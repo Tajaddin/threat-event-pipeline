@@ -6,7 +6,7 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build -- --configuration production
 
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --chmod=755 10-resolver.envsh /docker-entrypoint.d/10-resolver.envsh
 COPY --from=build /app/dist/console/browser /usr/share/nginx/html
