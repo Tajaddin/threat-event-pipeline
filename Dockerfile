@@ -17,7 +17,7 @@ COPY ${MODULE} ${MODULE}
 RUN --mount=type=cache,target=/root/.m2 mvn -q -B -pl ${MODULE} -am package -DskipTests -DskipITs -Dspotless.check.skip=true -Djacoco.skip=true \
  && cp ${MODULE}/target/${MODULE}-*.jar /app.jar
 
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:25-jre-alpine AS runtime
 RUN addgroup -S app && adduser -S app -G app && apk add --no-cache curl
 WORKDIR /app
 COPY --from=build /app.jar app.jar
