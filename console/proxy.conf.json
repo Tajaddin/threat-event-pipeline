@@ -1,0 +1,5 @@
+{
+  "/api/detect": { "target": "http://localhost:8083", "pathRewrite": { "^/api/detect": "/api" }, "changeOrigin": true },
+  "/api/ingest": { "target": "http://localhost:8081", "pathRewrite": { "^/api/ingest": "/api" }, "changeOrigin": true },
+  "/prom": { "target": "http://localhost:9093", "pathRewrite": { "^/prom": "" }, "changeOrigin": true }
+}

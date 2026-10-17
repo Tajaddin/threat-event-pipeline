@@ -1,0 +1,41 @@
+# Rendered by the nginx image's envsubst at start-up into /etc/nginx/conf.d/default.conf.
+# Only DNS_RESOLVER is substituted (set by 10-resolver.envsh from /etc/resolv.conf); nginx's own
+# $variables are not environment variables and stay as they are.
+server {
+  listen 80;
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  add_header X-Content-Type-Options nosniff always;
+  add_header Referrer-Policy no-referrer always;
+  add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'" always;
+
+  # Resolve upstream names per request (re-checked every 10 s) instead of once at start-up: a recreated
+  # service container gets a new address, and a name resolved at start-up would keep pointing at the old one.
+  resolver ${DNS_RESOLVER} valid=10s ipv6=off;
+  set $detect http://detect-service:8080;
+  set $ingest http://ingest-service:8080;
+  set $prom http://prometheus:9090;
+
+  location /api/detect/ {
+    rewrite ^/api/detect/(.*)$ /api/$1 break;
+    proxy_pass $detect;
+    proxy_set_header Host $host;
+    proxy_read_timeout 60s;
+  }
+  location /api/ingest/ {
+    rewrite ^/api/ingest/(.*)$ /api/$1 break;
+    proxy_pass $ingest;
+    proxy_set_header Host $host;
+    proxy_read_timeout 60s;
+  }
+  location /prom/ {
+    rewrite ^/prom/(.*)$ /$1 break;
+    proxy_pass $prom;
+    proxy_set_header Host $host;
+  }
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
