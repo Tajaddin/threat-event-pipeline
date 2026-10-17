@@ -1,0 +1,156 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    name: format, unit and integration tests (Testcontainers)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: mvn -B -q spotless:check
+      - name: verify (unit tests, integration tests with Kafka, Postgres and OpenSearch containers, coverage)
+        run: mvn -B verify
+      - name: coverage summary
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          covered = missed = 0
+          for f in glob.glob("*/target/site/jacoco*/jacoco.xml"):
+              for c in ET.parse(f).getroot().iter("counter"):
+                  if c.get("type") == "LINE":
+                      covered += int(c.get("covered")); missed += int(c.get("missed"))
+          total = covered + missed
+          print(f"JaCoCo line coverage: {covered}/{total} = {covered/total:.1%}" if total else "no coverage data")
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco
+          path: "*/target/site/jacoco*/"
+
+  console:
+    name: console lint, unit tests, build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx ng lint
+      - run: npx ng test --watch=false --browsers=ChromeHeadless
+      - run: npx ng build --configuration production
+
+  e2e:
+    name: compose end to end (generator -> alerts -> console)
+    runs-on: ubuntu-24.04
+    needs: [java, console]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: start the stack
+        run: |
+          cp .env.example .env
+          echo "OPENSEARCH_HEAP=512m" >> .env
+          docker compose --profile observability up -d --build
+          for i in $(seq 1 90); do curl -fsS http://localhost:8083/actuator/health/readiness && break || sleep 3; done
+          curl -fsS http://localhost:8081/actuator/health/readiness
+          curl -fsS http://localhost:8084/actuator/health/readiness
+          curl -fsS http://localhost:4200/ >/dev/null
+      - name: Playwright
+        working-directory: console
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          CONSOLE_BASE=http://localhost:4200 npx playwright test
+      - name: short load step and lag alert check
+        run: |
+          RATES="1000" SECONDS_PER_STEP=30 bash load/run-load.sh
+          curl -s http://localhost:9093/api/v1/rules | python3 -c "import json,sys; print([r['name'] for g in json.load(sys.stdin)['data']['groups'] for r in g['rules']])"
+      - name: logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 100 ingest-service enrich-service detect-service index-service
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e
+          path: |
+            console/playwright-report
+            load/results
+      - if: always()
+        run: docker compose --profile observability down -v
+
+  alerts:
+    name: alert rule unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          docker run --rm -v "$PWD/observability:/w" -w /w --entrypoint promtool prom/prometheus:v3.5.0 check rules alert_rules.yml
+          docker run --rm -v "$PWD/observability:/w" -w /w --entrypoint promtool prom/prometheus:v3.5.0 test rules alerts_test.yml
+
+  helm:
+    name: helm lint and template
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - run: helm lint deploy/helm/threat-event-pipeline
+      - run: helm template tep deploy/helm/threat-event-pipeline --set ingress.enabled=true --set serviceMonitor.enabled=true > /tmp/rendered.yaml && grep -c "^kind:" /tmp/rendered.yaml
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  images:
+    name: container images
+    runs-on: ubuntu-24.04
+    needs: [java]
+    strategy:
+      matrix:
+        module: [ingest-service, enrich-service, detect-service, index-service]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: MODULE=${{ matrix.module }}
+          push: false
+          tags: threat/${{ matrix.module }}:ci
+          cache-from: type=gha,scope=${{ matrix.module }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.module }}
