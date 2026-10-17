@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: enrich-service
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5435/threat}
+    username: ${POSTGRES_USER:threat}
+    password: ${POSTGRES_PASSWORD:threat}
+    hikari:
+      maximum-pool-size: 8
+  flyway:
+    enabled: true
+    table: flyway_history_enrich   # the two services share one database; each keeps its own migration history
+    baseline-on-migrate: true   # the other service may have populated the schema first
+    baseline-version: 0         # so V1 still runs (its statements are idempotent)
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: enrich
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 500
+      properties:
+        max.poll.interval.ms: 300000
+        fetch.min.bytes: 1
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      compression-type: lz4
+      transaction-id-prefix: ${ENRICH_TX_PREFIX:enrich-tx-}
+      properties:
+        enable.idempotence: true
+        linger.ms: 5
+    listener:
+      type: batch                # one Kafka transaction per poll, not per record
+      ack-mode: batch
+      observation-enabled: false
+  threads:
+    virtual:
+      enabled: true
+
+enrich:
+  concurrency: ${ENRICH_CONCURRENCY:3}
+
+server:
+  port: ${SERVER_PORT:8082}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      service: enrich-service

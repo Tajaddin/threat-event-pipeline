@@ -1,0 +1,16 @@
+id: auth-special-privileges-non-admin
+title: Special privileges assigned to a non-service account on a domain controller
+description: Event 4672 on a critical asset for an account outside the service-account naming convention.
+status: experimental
+level: CRITICAL
+tags: [attack.privilege_escalation, attack.t1078]
+logsource:
+  product: windows
+  category: AUTH
+detection:
+  selection:
+    event_code: "4672"
+    asset_criticality: critical
+  filter_service_accounts:
+    user|startswith: "svc-"
+  condition: selection and not filter_service_accounts

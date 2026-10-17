@@ -1,0 +1,18 @@
+# Sigma-shaped rule with this project's threshold extension (see docs/decisions/0002).
+id: auth-brute-force
+title: Brute force against one account
+description: Ten or more failed logons for the same user from the same source address within one minute.
+status: stable
+level: HIGH
+tags: [attack.credential_access, attack.t1110.001]
+logsource:
+  product: windows
+  category: AUTH
+detection:
+  selection:
+    event_code: "4625"
+  condition: selection
+threshold:
+  count: 10
+  window: 60s
+  groupBy: [src_ip, user]

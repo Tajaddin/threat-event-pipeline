@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: detect-service
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5435/threat}
+    username: ${POSTGRES_USER:threat}
+    password: ${POSTGRES_PASSWORD:threat}
+    hikari:
+      maximum-pool-size: 8
+  flyway:
+    enabled: true
+    table: flyway_history_detect   # the two services share one database; each keeps its own migration history
+    baseline-on-migrate: true   # the other service may have populated the schema first
+    baseline-version: 0         # so V1 still runs (its statements are idempotent)
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: detect
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 500
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      compression-type: lz4
+      properties:
+        enable.idempotence: true
+        linger.ms: 5
+    listener:
+      ack-mode: manual
+      observation-enabled: false
+  threads:
+    virtual:
+      enabled: true
+
+detect:
+  rules-dir: ${DETECT_RULES_DIR:}
+  window-retention: 30m
+  max-windows: 500000
+  max-event-ids-per-alert: 50
+  cors-origins: ${DETECT_CORS_ORIGINS:http://localhost:4200}
+  concurrency: ${DETECT_CONCURRENCY:3}
+
+server:
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      service: detect-service
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

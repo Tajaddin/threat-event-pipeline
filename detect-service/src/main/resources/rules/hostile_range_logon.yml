@@ -1,0 +1,16 @@
+id: auth-logon-from-hostile-range
+title: Successful logon from a known hostile network
+description: A successful network logon whose source address falls in a range tagged hostile in the IP context table.
+status: stable
+level: CRITICAL
+tags: [attack.initial_access, attack.t1078]
+logsource:
+  product: windows
+  category: AUTH
+detection:
+  selection:
+    event_code: "4624"
+    src_asn|contains:
+      - exitnode
+      - bullet
+  condition: selection

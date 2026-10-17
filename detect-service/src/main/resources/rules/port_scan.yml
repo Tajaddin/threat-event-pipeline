@@ -1,0 +1,19 @@
+id: fw-port-scan
+title: Port scan from an external address
+description: Fifty or more distinct destination ports denied for one external source within one minute.
+status: stable
+level: MEDIUM
+tags: [attack.discovery, attack.t1046]
+logsource:
+  product: firewall
+  category: FIREWALL
+detection:
+  selection:
+    action: deny
+    src_internal: false
+  condition: selection
+threshold:
+  count: 50
+  window: 60s
+  groupBy: [src_ip]
+  distinct: dst_port

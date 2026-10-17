@@ -1,0 +1,18 @@
+id: auth-lateral-movement
+title: Explicit-credential logons across many hosts
+description: One user logging on with explicit credentials (4648) to five or more distinct hosts within two minutes.
+status: stable
+level: HIGH
+tags: [attack.lateral_movement, attack.t1021]
+logsource:
+  product: windows
+  category: AUTH
+detection:
+  selection:
+    event_code: "4648"
+  condition: selection
+threshold:
+  count: 5
+  window: 120s
+  groupBy: [user]
+  distinct: host

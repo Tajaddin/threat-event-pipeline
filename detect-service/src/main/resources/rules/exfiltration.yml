@@ -1,0 +1,16 @@
+id: fw-large-outbound-transfer
+title: Large outbound transfer to an external address
+description: A single allowed connection from an internal host that moved more than 100 MB to an external destination.
+status: stable
+level: HIGH
+tags: [attack.exfiltration, attack.t1048]
+logsource:
+  product: firewall
+  category: FIREWALL
+detection:
+  selection:
+    action: allow
+    src_internal: true
+    dst_internal: false
+    bytes_out|gte: 100000000
+  condition: selection

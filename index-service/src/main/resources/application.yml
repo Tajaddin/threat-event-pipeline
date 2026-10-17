@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: index-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 1000
+      fetch-max-wait: 200ms
+      fetch-min-size: 65536
+    listener:
+      type: batch
+      ack-mode: manual
+      observation-enabled: false
+  threads:
+    virtual:
+      enabled: true
+
+index:
+  url: ${OPENSEARCH_URL:http://localhost:9200}
+  events-index-prefix: events
+  alerts-index-prefix: alerts
+  bulk-max-actions: 1000
+  concurrency: ${INDEX_CONCURRENCY:2}
+
+server:
+  port: ${SERVER_PORT:8084}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      service: index-service
