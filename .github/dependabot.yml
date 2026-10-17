@@ -1,28 +1,44 @@
+# One grouped pull request per ecosystem per month: enough to stay current without a queue of
+# single-package PRs, each running the full CI.
 version: 2
 updates:
-  - package-ecosystem: maven
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      java:
-        patterns: ["*"]
-  - package-ecosystem: npm
-    directory: /console
-    schedule:
-      interval: weekly
-    groups:
-      console:
-        patterns: ["*"]
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-  - package-ecosystem: docker
-    directory: /console
-    schedule:
-      interval: weekly
+- package-ecosystem: maven
+  directory: /
+  schedule:
+    interval: monthly
+  groups:
+    maven:
+      patterns:
+      - '*'
+- package-ecosystem: npm
+  directory: /console
+  schedule:
+    interval: monthly
+  groups:
+    npm:
+      patterns:
+      - '*'
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: monthly
+  groups:
+    github_actions:
+      patterns:
+      - '*'
+- package-ecosystem: docker
+  directory: /
+  schedule:
+    interval: monthly
+  groups:
+    docker_root:
+      patterns:
+      - '*'
+- package-ecosystem: docker
+  directory: /console
+  schedule:
+    interval: monthly
+  groups:
+    docker_console:
+      patterns:
+      - '*'
