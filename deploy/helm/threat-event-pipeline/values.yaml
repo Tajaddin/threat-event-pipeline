@@ -1,0 +1,68 @@
+# The chart deploys the four services and the console. Kafka, Postgres and OpenSearch are external:
+# point the endpoints below at your clusters (P9 provisions them with Strimzi, CloudNativePG and the
+# OpenSearch operator). Secrets are referenced by name, never inlined.
+
+image:
+  registry: ghcr.io/tajaddin
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+kafka:
+  bootstrapServers: kafka-kafka-bootstrap.kafka.svc:9092
+
+postgres:
+  url: jdbc:postgresql://threat-rw.threat.svc:5432/threat
+  user: threat
+  # name of a Secret with key `password`
+  existingSecret: threat-postgres
+
+opensearch:
+  url: http://opensearch-cluster-master.opensearch.svc:9200
+
+ingest:
+  replicas: 2
+  # name of a Secret with key `apiKeys` (comma-separated); leave empty for an open API (dev only)
+  apiKeysSecret: threat-ingest-keys
+  rateLimitPerMinute: 600000
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
+
+enrich:
+  replicas: 2
+  concurrency: 3
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
+
+detect:
+  replicas: 2
+  concurrency: 3
+  corsOrigins: "https://console.example.com"
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
+  # extra rules mounted at /rules; keys are file names
+  rules: {}
+
+index:
+  replicas: 1
+  concurrency: 2
+  resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
+
+console:
+  replicas: 1
+  resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
+
+ingress:
+  enabled: false
+  className: nginx
+  host: console.example.com
+  tls: false
+
+serviceMonitor:
+  # creates Prometheus Operator ServiceMonitors (kube-prometheus-stack)
+  enabled: false
+  labels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+networkPolicy:
+  enabled: true

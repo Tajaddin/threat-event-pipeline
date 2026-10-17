@@ -1,0 +1,54 @@
+{
+  "uid": "threat-pipeline",
+  "title": "Threat event pipeline",
+  "tags": ["kafka", "detection"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    { "id": 1, "type": "timeseries", "title": "Events per second by stage", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(ingest_events_total{outcome=\"accepted\"}[1m]))", "legendFormat": "ingest" },
+        { "refId": "B", "expr": "sum(rate(enrich_events_total{outcome=\"processed\"}[1m]))", "legendFormat": "enrich" },
+        { "refId": "C", "expr": "sum(rate(detect_events_total{outcome=\"evaluated\"}[1m]))", "legendFormat": "detect" },
+        { "refId": "D", "expr": "sum(rate(index_documents_total{kind=\"event\"}[1m]))", "legendFormat": "index" }
+      ], "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] } },
+    { "id": 2, "type": "timeseries", "title": "Consumer lag by group", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (consumergroup) (kafka_consumergroup_lag)", "legendFormat": "{{consumergroup}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 50000 }] } }, "overrides": [] } },
+    { "id": 3, "type": "timeseries", "title": "Detection latency (ingest to alert) p50 / p95 / p99", "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum(rate(detect_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(detect_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum(rate(detect_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p99" }
+      ], "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] } },
+    { "id": 4, "type": "timeseries", "title": "Alerts per minute by rule", "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (rule) (increase(detect_alerts_total[1m]))", "legendFormat": "{{rule}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] } },
+    { "id": 5, "type": "stat", "title": "Dead-lettered (1h)", "gridPos": { "x": 0, "y": 16, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(enrich_events_total{outcome=\"dlq\"}[1h]))" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] } },
+    { "id": 6, "type": "stat", "title": "Ingest rejections share (5m)", "gridPos": { "x": 6, "y": 16, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{service=\"ingest-service\",uri=\"/api/events\",status=~\"503|429\"}[5m])) / sum(rate(http_server_requests_seconds_count{service=\"ingest-service\",uri=\"/api/events\"}[5m]))" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] } },
+    { "id": 7, "type": "timeseries", "title": "JVM heap used by service", "gridPos": { "x": 12, "y": 16, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (service) (jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "{{service}}" }],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] } },
+    { "id": 8, "type": "timeseries", "title": "Produce and bulk latency p95", "gridPos": { "x": 0, "y": 21, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(ingest_produce_seconds_bucket[1m])) by (le))", "legendFormat": "ingest produce" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(index_bulk_seconds_bucket[1m])) by (le))", "legendFormat": "index bulk" }
+      ], "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] } }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "run_utc": "2026-10-17 11:45",
+  "machine": "single machine, Docker Desktop (WSL2) on Windows 11, Intel i7 / 20 threads, 16 GB VM memory",
+  "seconds_per_step": 60,
+  "attack_share": 0.02,
+  "seed_base": 1792237446,
+  "method": "ingest generator at a target rate per step; rates and lag read from Prometheus 1-minute windows at the end of each step; single machine, Docker Desktop",
+  "steps": [
+    {
+      "step": 1,
+      "target_eps": 32000,
+      "achieved_eps": 31938.3,
+      "ingest_eps": 29664.16894968885,
+      "enrich_eps": 31407.70375208651,
+      "detect_eps": 31501.17933086581,
+      "index_eps": 27051.544895404328,
+      "max_lag": 307367,
+      "detect_p95_ms": 4090.039739039023,
+      "detect_p99_ms": 5306.127759962573,
+      "alerts_per_s": 266.9642209158865
+    }
+  ]
+}

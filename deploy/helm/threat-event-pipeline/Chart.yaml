@@ -1,0 +1,10 @@
+apiVersion: v2
+name: threat-event-pipeline
+description: "Security event pipeline on Kafka: ingest, enrich, detect (Sigma-style rules), index into OpenSearch, Angular console"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [kafka, security, detection, opensearch, spring-boot]
+maintainers:
+  - name: Tajaddin Gafarov
+    email: gafarovtajaddin@gmail.com

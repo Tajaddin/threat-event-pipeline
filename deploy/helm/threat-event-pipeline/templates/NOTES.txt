@@ -1,0 +1,7 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as {{ .Release.Name }}.
+
+Services: {{ .Release.Name }}-ingest-service, -enrich-service, -detect-service, -index-service (port 8080), -console (port 80).
+Kafka: {{ .Values.kafka.bootstrapServers }}  Postgres: {{ .Values.postgres.url }}  OpenSearch: {{ .Values.opensearch.url }}
+
+Port-forward the console:  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-console 4200:80
+Start synthetic traffic:    curl -X POST http://localhost:4200/api/ingest/generate -H 'Content-Type: application/json' -d '{"eventsPerSecond":500,"seconds":30,"attackShare":0.05}'

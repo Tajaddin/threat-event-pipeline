@@ -1,0 +1,88 @@
+{
+  "run_utc": "2026-10-17 11:43",
+  "machine": "single machine, Docker Desktop (WSL2) on Windows 11, Intel i7 / 20 threads, 16 GB VM memory",
+  "seconds_per_step": 60,
+  "attack_share": 0.02,
+  "seed_base": 1792237002,
+  "method": "ingest generator at a target rate per step; rates and lag read from Prometheus 1-minute windows at the end of each step; single machine, Docker Desktop",
+  "steps": [
+    {
+      "step": 1,
+      "target_eps": 500,
+      "achieved_eps": 499.0,
+      "ingest_eps": 480.80412221496476,
+      "enrich_eps": 462.6521762795509,
+      "detect_eps": 488.06154292764353,
+      "index_eps": 489.3150028932298,
+      "max_lag": 125,
+      "detect_p95_ms": 10.893537958333333,
+      "detect_p99_ms": 13.701390799999992,
+      "alerts_per_s": 4.354452427607228
+    },
+    {
+      "step": 2,
+      "target_eps": 1000,
+      "achieved_eps": 998.0,
+      "ingest_eps": 917.1979149639478,
+      "enrich_eps": 970.627188446815,
+      "detect_eps": 931.7277829237727,
+      "index_eps": 935.3432618961134,
+      "max_lag": 228,
+      "detect_p95_ms": 14.195095215625003,
+      "detect_p99_ms": 18.72523707499999,
+      "alerts_per_s": 10.733939955320654
+    },
+    {
+      "step": 3,
+      "target_eps": 2000,
+      "achieved_eps": 1996.1,
+      "ingest_eps": 1919.518124750535,
+      "enrich_eps": 1846.9465510359591,
+      "detect_eps": 1948.5114026016436,
+      "index_eps": 1955.803911607823,
+      "max_lag": 317,
+      "detect_p95_ms": 15.562936785185187,
+      "detect_p99_ms": 20.93065217499996,
+      "alerts_per_s": 19.394401204666266
+    },
+    {
+      "step": 4,
+      "target_eps": 4000,
+      "achieved_eps": 3992.2,
+      "ingest_eps": 3650.3501578431724,
+      "enrich_eps": 3868.1350581490287,
+      "detect_eps": 3708.474699276086,
+      "index_eps": 3718.9070522706243,
+      "max_lag": 826,
+      "detect_p95_ms": 21.75479849311926,
+      "detect_p99_ms": 27.193944125781233,
+      "alerts_per_s": 41.34840430357241
+    },
+    {
+      "step": 5,
+      "target_eps": 8000,
+      "achieved_eps": 7984.6,
+      "ingest_eps": 7656.301026887768,
+      "enrich_eps": 7366.014732029464,
+      "detect_eps": 7774.229834173953,
+      "index_eps": 7792.514106355573,
+      "max_lag": 1348,
+      "detect_p95_ms": 26.201340249999983,
+      "detect_p99_ms": 37.71431994999993,
+      "alerts_per_s": 70.14169856849973
+    },
+    {
+      "step": 6,
+      "target_eps": 16000,
+      "achieved_eps": 15968.6,
+      "ingest_eps": 14575.009081002543,
+      "enrich_eps": 15430.250911663854,
+      "detect_eps": 14811.115147112241,
+      "index_eps": 14856.250340531411,
+      "max_lag": 2971,
+      "detect_p95_ms": 24.269053230769224,
+      "detect_p99_ms": 32.068001110280406,
+      "alerts_per_s": 136.94151834362515
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+# promtool test rules observability/alerts_test.yml
+rule_files:
+  - alert_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: ConsumerLagHigh fires after two minutes above 50k and stays quiet below
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="detect", topic="events.enriched", partition="0"}'
+        values: "1000 1000 60000 60000 60000 60000 1000 1000"
+      - series: 'kafka_consumergroup_lag{consumergroup="detect", topic="events.enriched", partition="1"}'
+        values: "0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ConsumerLagHigh
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ConsumerLagHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, consumergroup: detect, topic: events.enriched }
+            exp_annotations:
+              summary: "consumer group detect is 60000 records behind on events.enriched"
+              description: "Lag above 50,000 records for 2 minutes: the stage is not keeping up or is stuck."
+      - eval_time: 8m
+        alertname: ConsumerLagHigh
+        exp_alerts: []
+
+  - interval: 1m
+    name: ConsumerStalled fires when lag exists and offsets do not move
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="index-events", topic="events.enriched", partition="0"}'
+        values: "500 500 500 500 500 500 500 500 500 500"
+      - series: 'kafka_consumergroup_current_offset{consumergroup="index-events", topic="events.enriched", partition="0"}'
+        values: "1000 1000 1000 1000 1000 1000 1000 1000 1000 1000"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ConsumerStalled
+        exp_alerts:
+          - exp_labels: { severity: critical, consumergroup: index-events, topic: events.enriched }
+            exp_annotations:
+              summary: "consumer group index-events has lag but commits nothing on events.enriched"
+              description: "Offsets have not moved for 3 minutes while records are waiting."
+
+  - interval: 1m
+    name: ConsumerStalled stays quiet while offsets advance
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="index-events", topic="events.enriched", partition="0"}'
+        values: "500 500 500 500 500 500 500 500 500 500"
+      - series: 'kafka_consumergroup_current_offset{consumergroup="index-events", topic="events.enriched", partition="0"}'
+        values: "0+600x10"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ConsumerStalled
+        exp_alerts: []
+
+  - interval: 1m
+    name: DeadLetterRate fires at two per second
+    input_series:
+      - series: 'enrich_events_total{outcome="dlq"}'
+        values: "0+120x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: DeadLetterRate
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "more than one record per second is being dead-lettered"
+              description: "Malformed or unprocessable events are arriving at 2.0/s."
+
+  - interval: 1m
+    name: IngestRejections fires at 20% rejected
+    input_series:
+      - series: 'http_server_requests_seconds_count{service="ingest-service", uri="/api/events", status="202"}'
+        values: "0+80x10"
+      - series: 'http_server_requests_seconds_count{service="ingest-service", uri="/api/events", status="503"}'
+        values: "0+20x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: IngestRejections
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "ingest is rejecting more than 10% of requests"
+              description: "Backpressure (503) or rate limiting (429) share over 5 minutes: 20%."
+
+  - interval: 1m
+    name: DetectionLatencyHigh fires when p95 is above 5 s
+    input_series:
+      - series: 'detect_latency_seconds_bucket{le="1.0"}'
+        values: "0+1x20"
+      - series: 'detect_latency_seconds_bucket{le="5.0"}'
+        values: "0+1x20"
+      - series: 'detect_latency_seconds_bucket{le="10.0"}'
+        values: "0+10x20"
+      - series: 'detect_latency_seconds_bucket{le="+Inf"}'
+        values: "0+10x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: DetectionLatencyHigh
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "p95 detection latency above 5 s"
+              description: "Ingest to alert p95 over 5 minutes is 9.722s."
+
+  - interval: 1m
+    name: IndexFailures fires on any failure
+    input_series:
+      - series: "index_failures_total"
+        values: "0 0 0 3 3 3"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IndexFailures
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: IndexFailures
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "OpenSearch rejected documents"
+              description: "3 documents failed to index in the last 10 minutes."
+
+  - interval: 1m
+    name: ServiceDown fires after two minutes
+    input_series:
+      - series: 'up{job="services", service="detect-service", instance="detect-service:8080"}'
+        values: "1 1 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: services, service: detect-service, instance: "detect-service:8080" }
+            exp_annotations:
+              summary: "detect-service is not being scraped"
+              description: "Prometheus could not scrape detect-service for 2 minutes."

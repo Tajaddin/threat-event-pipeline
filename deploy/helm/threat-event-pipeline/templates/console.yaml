@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-console
+  labels:
+    {{- include "tep.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  replicas: {{ .Values.console.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: console
+  template:
+    metadata:
+      labels:
+        {{- include "tep.labels" . | nindent 8 }}
+        app.kubernetes.io/component: console
+    spec:
+      containers:
+        - name: console
+          image: {{ include "tep.image" (dict "Values" .Values "component" "console") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.console.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [NET_BIND_SERVICE] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-console
+  labels:
+    {{- include "tep.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: console
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-console
+  labels:
+    {{- include "tep.labels" . | nindent 4 }}
+  {{- if .Values.ingress.tls }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Release.Name }}-console-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-console
+                port: { name: http }
+{{- end }}

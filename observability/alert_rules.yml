@@ -1,0 +1,70 @@
+# Alerts for the pipeline. Each has a promtool unit test in alerts_test.yml.
+# Consumer lag comes from kafka-exporter (kafka_consumergroup_lag); stage metrics are Micrometer counters
+# exposed by Spring Boot Actuator (names get a _total suffix in Prometheus).
+groups:
+  - name: threat-event-pipeline
+    rules:
+      - alert: ConsumerLagHigh
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 50000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "consumer group {{ $labels.consumergroup }} is {{ $value }} records behind on {{ $labels.topic }}"
+          description: "Lag above 50,000 records for 2 minutes: the stage is not keeping up or is stuck."
+
+      - alert: ConsumerStalled
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 0 and sum by (consumergroup, topic) (rate(kafka_consumergroup_current_offset[5m])) == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "consumer group {{ $labels.consumergroup }} has lag but commits nothing on {{ $labels.topic }}"
+          description: "Offsets have not moved for 3 minutes while records are waiting."
+
+      - alert: DeadLetterRate
+        expr: sum(rate(enrich_events_total{outcome="dlq"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "more than one record per second is being dead-lettered"
+          description: "Malformed or unprocessable events are arriving at {{ $value | printf \"%.1f\" }}/s."
+
+      - alert: IngestRejections
+        expr: |
+          sum(rate(http_server_requests_seconds_count{service="ingest-service",uri="/api/events",status=~"503|429"}[5m]))
+            / sum(rate(http_server_requests_seconds_count{service="ingest-service",uri="/api/events"}[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ingest is rejecting more than 10% of requests"
+          description: "Backpressure (503) or rate limiting (429) share over 5 minutes: {{ $value | humanizePercentage }}."
+
+      - alert: DetectionLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(detect_latency_seconds_bucket[5m])) by (le)) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 detection latency above 5 s"
+          description: "Ingest to alert p95 over 5 minutes is {{ $value | humanizeDuration }}."
+
+      - alert: IndexFailures
+        expr: sum(increase(index_failures_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenSearch rejected documents"
+          description: "{{ $value }} documents failed to index in the last 10 minutes."
+
+      - alert: ServiceDown
+        expr: up{job="services"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} is not being scraped"
+          description: "Prometheus could not scrape {{ $labels.service }} for 2 minutes."
