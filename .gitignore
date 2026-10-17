@@ -1,0 +1,15 @@
+target/
+*.log
+.env
+.env.*
+!.env.example
+console/node_modules/
+console/dist/
+console/.angular/
+console/playwright-report/
+console/test-results/
+load/results/*
+!load/results/latest*.json
+.idea/
+.vscode/
+*.iml

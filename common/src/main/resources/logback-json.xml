@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Included by each service's logback-spring.xml: JSON lines on stdout with service name, level, logger, trace ids. -->
+<included>
+  <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <customFields>{"service":"${SERVICE_NAME:-service}"}</customFields>
+      <includeMdcKeyName>traceId</includeMdcKeyName>
+      <includeMdcKeyName>spanId</includeMdcKeyName>
+      <fieldNames>
+        <timestamp>timestamp</timestamp>
+        <version>[ignore]</version>
+        <levelValue>[ignore]</levelValue>
+      </fieldNames>
+    </encoder>
+  </appender>
+  <logger name="org.apache.kafka" level="WARN"/>
+  <logger name="org.springframework.kafka" level="INFO"/>
+  <root level="${LOG_LEVEL:-INFO}">
+    <appender-ref ref="JSON"/>
+  </root>
+</included>

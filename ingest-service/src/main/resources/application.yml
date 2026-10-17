@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: ingest-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      compression-type: lz4
+      batch-size: 65536
+      properties:
+        enable.idempotence: true
+        linger.ms: 5
+        max.in.flight.requests.per.connection: 5
+        request.timeout.ms: 20000
+        delivery.timeout.ms: 60000   # must exceed linger.ms + request.timeout.ms
+        max.block.ms: 5000
+        buffer.memory: 67108864
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+  tomcat:
+    max-http-form-post-size: 10MB
+    max-swallow-size: 10MB
+    threads:
+      max: 64
+
+ingest:
+  api-keys: ${INGEST_API_KEYS:}
+  rate-limit-per-minute: ${INGEST_RATE_LIMIT_PER_MINUTE:600000}
+  max-batch: 1000
+  dedup-window: 10m
+  dedup-max-entries: 2000000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      service: ingest-service
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html

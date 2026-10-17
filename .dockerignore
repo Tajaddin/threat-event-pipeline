@@ -1,0 +1,6 @@
+.git
+**/target/
+console/node_modules
+console/dist
+.env
+load/results
