@@ -27,6 +27,11 @@ results="["
 i=0
 for rate in $RATES; do
   i=$((i+1))
+  # the generator runs one burst at a time (409 while busy); wait for any earlier burst to finish
+  for _ in $(seq 1 120); do
+    curl -fsS "$INGEST/api/generate" "${hdr[@]}" | python -c "import json,sys; sys.exit(1 if json.load(sys.stdin)['running'] else 0)" && break
+    sleep 1
+  done
   curl -fsS -X POST "$INGEST/api/generate" "${hdr[@]}" -d "{\"eventsPerSecond\":$rate,\"seconds\":$STEP,\"attackShare\":$ATTACK,\"seed\":$((SEED_BASE + i))}" >/dev/null
   sleep "$STEP"
   # let the tail drain a little, then read 1-minute rates covering the step
