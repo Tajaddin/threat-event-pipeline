@@ -8,7 +8,9 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,8 +20,11 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
- * At-least-once: the offset is acknowledged after the alerts are stored and produced. Redelivery is
- * safe because alert ids are deterministic and the store upserts.
+ * At-least-once: the offset is acknowledged only after every alert the event raised is stored and
+ * its send to the alerts topic is acknowledged. If either fails the listener throws, {@link
+ * KafkaConfig}'s error handler redelivers the record, and the engine, which does not count a
+ * redelivered event twice, returns the same alert again; ids are deterministic and the store
+ * upserts, so the retry is harmless.
  */
 @Component
 public class DetectListener {
@@ -79,9 +84,10 @@ public class DetectListener {
     List<Alert> found = rules.engine().evaluate(enriched);
     sample.stop(evalTimer);
     evaluated.increment();
+    List<CompletableFuture<?>> sends = new ArrayList<>(found.size());
     for (Alert alert : found) {
       alerts.upsert(alert);
-      kafka.send(Topics.ALERTS, alert.key(), Json.write(alert));
+      sends.add(kafka.send(Topics.ALERTS, alert.key(), Json.write(alert)));
       registry
           .counter("detect.alerts", "rule", alert.ruleId(), "severity", alert.severity().name())
           .increment();
@@ -94,6 +100,7 @@ public class DetectListener {
           alert.eventCount(),
           alert.detectionLatencyMs());
     }
+    CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new)).join();
     ack.acknowledge();
   }
 }

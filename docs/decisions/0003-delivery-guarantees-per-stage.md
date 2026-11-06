@@ -23,16 +23,25 @@ sink, so each gets the guarantee its sink can honour.
   (`TransientDataAccessException`, `DataAccessResourceFailureException` and the like, Kafka exceptions)
   rolls the whole poll back, and the after-rollback processor re-reads it with back-off from one second to
   thirty, indefinitely, so an outage dead-letters nothing.
-- **detect**: at-least-once with manual acknowledgement after the alert is stored and produced; alert ids
-  are deterministic and the store upserts, so redelivery is harmless (tested by producing the same burst
-  twice).
+- **detect**: at-least-once with manual acknowledgement after the alert is stored and its send to `alerts`
+  is acknowledged; alert ids are deterministic and the store upserts, so redelivery is harmless (tested by
+  producing the same burst twice). Each threshold window keeps the ids of the events it counted, so a
+  redelivered event is not counted again, and one that counted towards an alert that already fired returns
+  that alert again: when storing or producing it failed, the retry finishes the job. A database or broker
+  failure is retried with back-off from one second to thirty, indefinitely; any other failure (a rule that
+  throws on an event, say) is tried three times and the event goes to `events.dlq` with `error-stage`
+  `detect`.
 - **index**: batch consumer, one bulk request per poll, documents keyed by their ids so a redelivered
   batch overwrites rather than duplicates; a failed bulk throws, the batch is redelivered with exponential
   back-off, nothing is dropped.
 
 ## Consequences
 
-- The first version reported the failing record's index and relied on `DefaultAfterRollbackProcessor` to
+- The first detect version set the window's "fired" flag before storing the alert and produced it without
+  waiting. A failed store was redelivered by Spring's default error handler (ten attempts, no back-off,
+  then skip), the engine saw the flag, emitted nothing, and the alert was lost; each retry also counted the
+  event again.
+- The first enrich version reported the failing record's index and relied on `DefaultAfterRollbackProcessor` to
   dead-letter it. A transactional batch listener never does that: it either re-seeks the whole batch or, with
   `batchRecoverAfterRollback`, dead-letters every record in it. The processor bean was also typed
   `<String, String>`, which Spring Boot does not inject into the container factory, so it was never used.
@@ -40,8 +49,10 @@ sink, so each gets the guarantee its sink can honour.
 - The tests assert the properties: `EnrichFailurePolicyTest` (in-process broker) puts a record the
   database rejects between good ones and expects it alone in the DLQ, and makes the database fail twice
   and expects nothing dead-lettered; `EnrichIT` sends 32 good and 3 bad records and expects exactly 32
-  enriched and 3 dead-lettered; `DetectIT` sends a burst twice and expects one alert; `IndexIT`
-  sends everything twice and counts documents.
+  enriched and 3 dead-lettered; `DetectIT` sends a burst twice and expects one alert;
+  `DetectFailurePolicyTest` (in-process broker) dead-letters an event that makes a rule throw and waits
+  out a database that refuses three stores without losing the alert; `IndexIT` sends everything twice and
+  counts documents.
 - The first version committed a transaction per record (`ack-mode: record`). The first load run measured
   about 65 events per second on the enrich stage, with `sendOffsetsToTransaction` and the commit taking
   about 15 ms per record, and all traffic on one partition because ingest keyed records by feed name. The

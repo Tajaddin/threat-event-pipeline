@@ -151,6 +151,52 @@ class RuleEngineTest {
   }
 
   @Test
+  void redeliveredEventIsCountedOnceAndReEmitsTheAlertAfterItFired() {
+    DetectionEngine engine = new DetectionEngine(Duration.ofMinutes(5), 1000, 10);
+    engine.setRules(RuleLoader.load(null).rules());
+    Instant base = Instant.parse("2026-10-17T12:00:00Z");
+    List<EnrichedEvent> failures = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      failures.add(
+          enriched(
+              new Event(
+                  "f" + i,
+                  base.plusSeconds(i),
+                  Event.EventType.AUTH,
+                  "t",
+                  "ws-0101",
+                  "a.khan",
+                  "203.0.113.9",
+                  null,
+                  null,
+                  "failure",
+                  "4625",
+                  3,
+                  null,
+                  null),
+              false,
+              "medium"));
+    }
+    for (int i = 0; i < 9; i++) {
+      assertThat(bruteForce(engine.evaluate(failures.get(i)))).isEmpty();
+    }
+    // the ninth failure delivered again must not stand in for the tenth
+    assertThat(bruteForce(engine.evaluate(failures.get(8)))).isEmpty();
+
+    List<Alert> fired = bruteForce(engine.evaluate(failures.get(9)));
+    assertThat(fired).hasSize(1);
+    assertThat(fired.get(0).eventCount()).isEqualTo(10);
+
+    // redelivery after the alert fired (say its store failed) re-emits the same alert
+    assertThat(bruteForce(engine.evaluate(failures.get(9)))).containsExactly(fired.get(0));
+    assertThat(bruteForce(engine.evaluate(failures.get(3)))).containsExactly(fired.get(0));
+  }
+
+  private static List<Alert> bruteForce(List<Alert> alerts) {
+    return alerts.stream().filter(a -> a.ruleId().equals("auth-brute-force")).toList();
+  }
+
+  @Test
   void distinctThresholdCountsDistinctValues() {
     DetectionEngine engine = new DetectionEngine(Duration.ofMinutes(5), 1000, 10);
     engine.setRules(RuleLoader.load(null).rules());

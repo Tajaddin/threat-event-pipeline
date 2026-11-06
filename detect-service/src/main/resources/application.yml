@@ -29,7 +29,7 @@ spring:
       compression-type: lz4
       properties:
         enable.idempotence: true
-        linger.ms: 5
+        linger.ms: 0   # every alert send is awaited before the offset is acknowledged; lingering only adds latency
     listener:
       ack-mode: manual
       observation-enabled: false

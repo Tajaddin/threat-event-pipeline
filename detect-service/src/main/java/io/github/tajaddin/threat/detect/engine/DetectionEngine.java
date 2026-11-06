@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -23,7 +24,8 @@ import java.util.stream.Collectors;
  * count (or distinct value count) reaches the threshold within the tumbling window. Windows are
  * keyed by the event's own timestamp, so replayed or out-of-order events land in the right window.
  * The alert id is derived from (rule, key, window), which makes alert storage idempotent across
- * restarts and redeliveries.
+ * restarts and redeliveries. A redelivered event is not counted again, and one that counted towards
+ * an alert that already fired returns that alert again (see {@link WindowState}).
  */
 public final class DetectionEngine {
   private final AtomicReference<List<CompiledRule>> rules = new AtomicReference<>(List.of());
@@ -84,41 +86,47 @@ public final class DetectionEngine {
               Math.floorDiv(eventTime.toEpochMilli(), windowMillis) * windowMillis);
       String stateKey = rule.id() + "|" + key + "|" + windowStart.toEpochMilli();
       WindowState state = windows.get(stateKey, k -> new WindowState(windowStart));
-      boolean fire;
+      String eventId = enriched.event().id();
+      Alert alert = null;
       synchronized (state) {
-        state.count++;
-        state.lastSeen = eventTime.isAfter(state.lastSeen) ? eventTime : state.lastSeen;
-        state.firstSeen = eventTime.isBefore(state.firstSeen) ? eventTime : state.firstSeen;
-        state.firstIngestedAt =
-            ingestedAt.isBefore(state.firstIngestedAt) ? ingestedAt : state.firstIngestedAt;
-        if (state.eventIds.size() < maxEventIdsPerAlert) {
-          state.eventIds.add(enriched.event().id());
-        }
-        if (t.distinct() != null) {
-          state.distinct.add(String.valueOf(flat.get(t.distinct())));
-        }
-        long measure = t.distinct() != null ? state.distinct.size() : state.count;
-        fire = !state.fired && measure >= t.count();
-        if (fire) {
-          state.fired = true;
+        if (state.counted.contains(eventId)) {
+          alert = state.alert;
+        } else if (state.alert == null) {
+          state.count++;
+          state.lastSeen = eventTime.isAfter(state.lastSeen) ? eventTime : state.lastSeen;
+          state.firstSeen = eventTime.isBefore(state.firstSeen) ? eventTime : state.firstSeen;
+          state.firstIngestedAt =
+              ingestedAt.isBefore(state.firstIngestedAt) ? ingestedAt : state.firstIngestedAt;
+          if (state.eventIds.size() < maxEventIdsPerAlert) {
+            state.eventIds.add(eventId);
+          }
+          boolean moved =
+              t.distinct() == null || state.distinct.add(String.valueOf(flat.get(t.distinct())));
+          if (moved) {
+            state.counted.add(eventId);
+          }
+          long measure = t.distinct() != null ? state.distinct.size() : state.count;
+          if (measure >= t.count()) {
+            state.alert =
+                new Alert(
+                    alertId(rule.id(), key, windowStart),
+                    rule.id(),
+                    rule.title(),
+                    rule.severity(),
+                    key,
+                    List.copyOf(state.eventIds),
+                    (int) state.count,
+                    state.firstSeen,
+                    state.lastSeen,
+                    now,
+                    latency,
+                    summary(rule, flat, state.count));
+            alert = state.alert;
+          }
         }
       }
-      if (fire) {
-        long thresholdLatency = Math.max(0, Duration.between(ingestedAt, now).toMillis());
-        alerts.add(
-            new Alert(
-                alertId(rule.id(), key, windowStart),
-                rule.id(),
-                rule.title(),
-                rule.severity(),
-                key,
-                List.copyOf(state.eventIds),
-                (int) state.count,
-                state.firstSeen,
-                state.lastSeen,
-                now,
-                thresholdLatency,
-                summary(rule, flat, state.count)));
+      if (alert != null) {
+        alerts.add(alert);
       }
     }
     return alerts;
@@ -143,14 +151,21 @@ public final class DetectionEngine {
     return sb.toString();
   }
 
+  /**
+   * {@code counted} holds the ids of the events that moved the measure before the window fired (at
+   * most the threshold), so a redelivered event is not counted twice; when one of them comes back
+   * after the alert fired, the same alert is returned again, so a caller whose store or send failed
+   * can finish the job. {@code alert} is set once, when the window fires.
+   */
   static final class WindowState {
     final Instant windowStart;
     long count;
     Instant firstSeen;
     Instant lastSeen;
     Instant firstIngestedAt = Instant.MAX;
-    boolean fired;
-    final List<String> eventIds = new ArrayList<>();
+    Alert alert;
+    final Set<String> eventIds = new LinkedHashSet<>();
+    final Set<String> counted = new HashSet<>();
     final Set<String> distinct = new HashSet<>();
 
     WindowState(Instant windowStart) {

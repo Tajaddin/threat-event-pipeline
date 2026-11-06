@@ -35,7 +35,7 @@ flowchart LR
 | `common` | `Event`, `EnrichedEvent`, `Alert` records with validation, topic names, shared JSON, the synthetic generator | |
 | `ingest-service` | `POST /api/events` (batch of validated events), `X-API-Key`, per-key token bucket, produces to `events.raw` keyed by source address; `POST /api/generate` drives synthetic load | idempotent producer, `acks=all`; duplicate event ids dropped for ten minutes, counting an id only once Kafka acknowledged it; 429 when the key's bucket is empty, 503 with `Retry-After` when the producer buffer is full or the broker times out |
 | `enrich-service` | consumes `events.raw`, adds country, ASN and internal flag from `ip_ranges` (inet containment) and owner and criticality from `assets`, produces `events.enriched`; malformed input to `events.dlq` with the error in headers | consume-transform-produce in one Kafka transaction per poll; outputs and offsets commit together, downstream reads `read_committed`; a record that fails on its own is dead-lettered inside the transaction, a database or broker failure rolls the poll back and retries it with back-off |
-| `detect-service` | loads `rules/*.yml` into Postgres, evaluates stateless rules per event and threshold rules over tumbling windows per key, stores and produces `alerts`; REST for alerts, rules and stats | at-least-once with manual acknowledgement; alert ids are deterministic on (rule, key, window) and the store upserts, so redelivery is harmless |
+| `detect-service` | loads `rules/*.yml` into Postgres, evaluates stateless rules per event and threshold rules over tumbling windows per key, stores and produces `alerts`; REST for alerts, rules and stats | at-least-once: the offset is acknowledged after the alert is stored and its send acknowledged; a redelivered event is not counted twice and re-emits its alert, whose id is deterministic on (rule, key, window) and which the store upserts; database or broker failures are retried with back-off indefinitely, any other failure three times, then the event goes to `events.dlq` |
 | `index-service` | bulk-indexes `events.enriched` and `alerts` into daily OpenSearch indices | documents keyed by event or alert id; a failed bulk is redelivered with exponential back-off |
 | `console` | Angular 20 (standalone, signals, zoneless): alerts with filters and detail, rules with hit counts, pipeline tab with the generator and Prometheus rates | |
 
@@ -109,6 +109,11 @@ quantiles from the detect histogram) and waits for lag to drain before the next 
 Run 2026-10-17 11:43 UTC, 60 s per step, attack share 2%, seed base 1792237002; single machine, Docker Desktop (WSL2) on Windows 11, Intel i7 / 20 threads, 16 GB VM memory. Rates are 1-minute Prometheus rates read at the end of each step, lag is the maximum over the step across all consumer groups, latency is ingest-accepted to alert-created from the detect histogram.
 <!-- /LOAD-RESULTS -->
 
+These runs predate two changes to detect (November 2026): it now waits for each alert's send to be
+acknowledged before it commits the event's offset (its producer no longer lingers), and it keeps the ids of
+the events each threshold window counted. The load run has not been repeated since, so the detect, latency
+and alert columns describe the earlier version.
+
 The generator runs inside ingest-service and calls the same accept path as `POST /api/events`, so the
 numbers include validation, de-duplication and the producer but not HTTP parsing. At 16,000 events/s the stack
 had not saturated: lag stayed under 3,000 records (under a fifth of a second of traffic) and detection p99 at
@@ -136,6 +141,11 @@ records) is what produced the table above; the change and the measurement are re
   that fails twice is retried with back-off and dead-letters nothing.
 - `DetectIT` replays a password-spray burst twice and asserts one alert, because the alert id is
   deterministic and the store upserts.
+- `DetectFailurePolicyTest` (in-process broker, storage mocked) feeds an event that makes a rule throw, then
+  two that raise alerts while the database refuses three stores: the first goes to `events.dlq` after three
+  attempts, and both alerts are stored and produced. `DetectListenerTest` checks the offset is not
+  acknowledged before the alert's send is, and `RuleEngineTest` that a redelivered event is not counted
+  twice.
 - `IndexIT` sends every document twice and asserts the count does not double.
 - `RuleEngineTest` covers the parser, the modifiers, the condition grammar, and the window arithmetic.
 - The alert rules have promtool unit tests (`observability/alerts_test.yml`): eight scenarios, including the
