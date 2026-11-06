@@ -6,6 +6,8 @@ updates:
   directory: /
   schedule:
     interval: monthly
+  cooldown:
+    default-days: 7
   groups:
     maven:
       patterns:
@@ -14,6 +16,8 @@ updates:
   directory: /console
   schedule:
     interval: monthly
+  cooldown:
+    default-days: 7
   groups:
     npm:
       patterns:
@@ -22,6 +26,8 @@ updates:
   directory: /
   schedule:
     interval: monthly
+  cooldown:
+    default-days: 7
   groups:
     github_actions:
       patterns:
@@ -30,6 +36,8 @@ updates:
   directory: /
   schedule:
     interval: monthly
+  cooldown:
+    default-days: 7
   groups:
     docker_root:
       patterns:
@@ -38,6 +46,8 @@ updates:
   directory: /console
   schedule:
     interval: monthly
+  cooldown:
+    default-days: 7
   groups:
     docker_console:
       patterns:
