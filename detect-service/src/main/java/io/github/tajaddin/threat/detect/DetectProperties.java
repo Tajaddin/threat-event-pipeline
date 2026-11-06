@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * @param rulesDir optional directory of extra rule YAML files (mounted ConfigMap in Kubernetes)
- * @param windowRetention how long threshold windows stay in memory after their last event
+ * @param windowRetention how long a threshold window stays in memory after its first event
  * @param maxWindows bound on concurrently tracked (rule, key, window) states
  * @param maxEventIdsPerAlert how many triggering event ids an alert keeps
  * @param corsOrigins origins allowed to call the alert API (the console)

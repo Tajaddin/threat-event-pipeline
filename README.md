@@ -263,7 +263,15 @@ commands.
 - Threshold windows live in each detect instance's memory (Caffeine, bounded by `max-windows`). One instance
   with three consumer threads sees every key; two instances would each see the partitions they own, so a rule
   grouping by a field other than the partition key (source address) would under-count across instances, which
-  is why the Helm chart deploys one detect replica. A state store (Kafka Streams or Flink) is the next step.
+  is why the Helm chart deploys one detect replica. The memory is also why a database or broker outage can
+  still cost an alert: a window that fired is kept for `window-retention` (30 minutes from its first event),
+  so if the alert cannot be stored until then, or the instance restarts meanwhile, the redelivered event
+  starts a fresh window and falls short of the threshold. A state store (Kafka Streams or Flink) is the next
+  step.
+- Each enrich pod's transactional id prefix is its pod name. A Deployment gives a replacement pod a new name,
+  so it cannot fence a crashed pod's open transaction; detect and index, which read `read_committed`, wait at
+  that partition until the transaction times out (`transaction.timeout.ms`, 60 s by default). A StatefulSet
+  would give the replacement the same name and ids, and abort the old transaction as it starts.
 - Ingest de-duplication is per instance and in memory; two replicas could each accept the same event id, and
   so could two concurrent requests to one instance, because an id is remembered only once Kafka acknowledged
   it (the trade that keeps a failed batch retryable).

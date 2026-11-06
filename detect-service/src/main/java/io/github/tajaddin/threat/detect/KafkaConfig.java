@@ -26,9 +26,12 @@ import org.springframework.util.backoff.FixedBackOff;
 /**
  * Error policy for the detect listener. When the database or the broker fails, the record is
  * redelivered after a pause that grows from one second to thirty and never gives up, so an outage
- * delays alerts but loses none. Any other failure belongs to the record (or to a rule it trips): it
- * is tried three times a second apart, then published to events.dlq with the error and stage in
- * headers, counted as {@code detect.events{outcome=dlq}}, and the partition moves on.
+ * delays alerts rather than dropping them, as long as the threshold window the record fired is
+ * still in memory: an outage that outlasts {@code detect.window-retention}, or a restart during it,
+ * loses that alert (see the README's Limitations). Any other failure belongs to the record (or to a
+ * rule it trips): it is tried three times a second apart, then published to events.dlq with the
+ * error and stage in headers, counted as {@code detect.events{outcome=dlq}}, and the partition
+ * moves on.
  */
 @Configuration
 public class KafkaConfig {
