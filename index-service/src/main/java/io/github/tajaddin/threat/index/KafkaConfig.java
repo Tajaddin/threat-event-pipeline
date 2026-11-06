@@ -6,7 +6,9 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 
 /**
- * A failed bulk (OpenSearch down) is retried with exponential back-off; the batch is never dropped.
+ * A failed bulk (OpenSearch down, or documents refused with 429 or a 5xx) is retried with
+ * exponential back-off; the batch is never dropped. Documents refused for any other reason are
+ * dead-lettered by the listener instead.
  */
 @Configuration
 public class KafkaConfig {

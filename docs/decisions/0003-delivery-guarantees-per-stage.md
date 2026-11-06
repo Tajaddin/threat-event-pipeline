@@ -32,8 +32,12 @@ sink, so each gets the guarantee its sink can honour.
   throws on an event, say) is tried three times and the event goes to `events.dlq` with `error-stage`
   `detect`.
 - **index**: batch consumer, one bulk request per poll, documents keyed by their ids so a redelivered
-  batch overwrites rather than duplicates; a failed bulk throws, the batch is redelivered with exponential
-  back-off, nothing is dropped.
+  batch overwrites rather than duplicates; a failed bulk, or any document refused with 429 or a 5xx,
+  throws, and the batch is redelivered with exponential back-off, nothing dropped. A document refused for
+  any other reason (a 400 mapping conflict, which no retry fixes) goes to `events.dlq` with the status and
+  reason in headers once no retryable refusals remain in the batch, and the batch is acknowledged. The
+  first version threw on any refused document with unlimited retries, so one such document stopped the
+  stage for good.
 
 ## Consequences
 
