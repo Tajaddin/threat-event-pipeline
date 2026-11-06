@@ -96,18 +96,30 @@ class EnrichIT {
       producer.send(new ProducerRecord<>(Topics.RAW, "it", Json.write(hostile))).get();
       producer.send(new ProducerRecord<>(Topics.RAW, "it", "{\"this\":\"is not an event\"}")).get();
       producer.send(new ProducerRecord<>(Topics.RAW, "it", "not even json")).get();
+      // past ingest's validation: an address the inet cast cannot parse, then a good event on the
+      // same partition, which must still be enriched
+      producer
+          .send(new ProducerRecord<>(Topics.RAW, "it", Json.write(withSrcIp("bad-ip-1", "x"))))
+          .get();
+      producer
+          .send(
+              new ProducerRecord<>(
+                  Topics.RAW, "it", Json.write(withSrcIp("after-bad-ip-1", "10.1.1.1"))))
+          .get();
     }
 
     List<ConsumerRecord<String, String>> enriched =
-        consume(Topics.ENRICHED, 31, Duration.ofSeconds(60));
-    List<ConsumerRecord<String, String>> dlq = consume(Topics.DLQ, 2, Duration.ofSeconds(30));
+        consume(Topics.ENRICHED, 32, Duration.ofSeconds(60));
+    List<ConsumerRecord<String, String>> dlq = consume(Topics.DLQ, 3, Duration.ofSeconds(30));
 
-    assertThat(enriched).hasSize(31);
+    assertThat(enriched).hasSize(32);
     assertThat(
             enriched.stream()
                 .map(r -> Json.read(r.value(), EnrichedEvent.class).event().id())
                 .distinct())
-        .hasSize(31);
+        .hasSize(32)
+        .contains("after-bad-ip-1")
+        .doesNotContain("bad-ip-1");
     EnrichedEvent h =
         enriched.stream()
             .map(r -> Json.read(r.value(), EnrichedEvent.class))
@@ -128,7 +140,7 @@ class EnrichIT {
             .orElseThrow();
     assertThat(internal.srcInternal()).isTrue();
 
-    assertThat(dlq).hasSize(2);
+    assertThat(dlq).hasSize(3);
     assertThat(dlq).allMatch(r -> r.headers().lastHeader(Topics.HEADER_ERROR) != null);
     assertThat(dlq)
         .allMatch(
@@ -137,6 +149,24 @@ class EnrichIT {
                         r.headers().lastHeader(Topics.HEADER_ERROR_STAGE).value(),
                         StandardCharsets.UTF_8)
                     .equals("enrich"));
+  }
+
+  private static Event withSrcIp(String id, String srcIp) {
+    return new Event(
+        id,
+        Instant.now(),
+        Event.EventType.AUTH,
+        "it",
+        "ws-0101",
+        "a.khan",
+        srcIp,
+        null,
+        null,
+        "failure",
+        "4625",
+        3,
+        null,
+        null);
   }
 
   private static List<ConsumerRecord<String, String>> consume(

@@ -16,11 +16,13 @@ sink, so each gets the guarantee its sink can honour.
 - **enrich**: consume-transform-produce in one Kafka transaction per poll (`transaction-id-prefix`,
   batch listener, up to `max.poll.records` = 500 records, `isolation.level=read_committed` downstream). The
   enriched records, the DLQ records for malformed input and the consumed offsets commit or abort together,
-  so a crash never leaves a duplicate output visible to `read_committed` consumers. An unexpected failure
-  (database down) rolls back with the index of the failing record (`BatchListenerFailedException`): the
-  records before it are committed, it is retried three times a second apart, and after that
-  `DefaultAfterRollbackProcessor` publishes it to `events.dlq` with the exception in headers and commits its
-  offset, so a poison record cannot stall a partition.
+  so a crash never leaves a duplicate output visible to `read_committed` consumers. A record that fails on
+  its own (malformed, an address that is not an IP, a value the database rejects, a bug) is published to
+  `events.dlq` with the error in headers inside the same transaction, and the records around it carry on,
+  so a poison record cannot stall a partition. A failure of the database or the broker
+  (`TransientDataAccessException`, `DataAccessResourceFailureException` and the like, Kafka exceptions)
+  rolls the whole poll back, and the after-rollback processor re-reads it with back-off from one second to
+  thirty, indefinitely, so an outage dead-letters nothing.
 - **detect**: at-least-once with manual acknowledgement after the alert is stored and produced; alert ids
   are deterministic and the store upserts, so redelivery is harmless (tested by producing the same burst
   twice).
@@ -30,8 +32,15 @@ sink, so each gets the guarantee its sink can honour.
 
 ## Consequences
 
-- The integration tests assert the properties: `EnrichIT` sends 31 good and 2 bad records and expects
-  exactly 31 enriched and 2 dead-lettered; `DetectIT` sends a burst twice and expects one alert; `IndexIT`
+- The first version reported the failing record's index and relied on `DefaultAfterRollbackProcessor` to
+  dead-letter it. A transactional batch listener never does that: it either re-seeks the whole batch or, with
+  `batchRecoverAfterRollback`, dead-letters every record in it. The processor bean was also typed
+  `<String, String>`, which Spring Boot does not inject into the container factory, so it was never used.
+  One poison record redelivered the same batch forever.
+- The tests assert the properties: `EnrichFailurePolicyTest` (in-process broker) puts a record the
+  database rejects between good ones and expects it alone in the DLQ, and makes the database fail twice
+  and expects nothing dead-lettered; `EnrichIT` sends 32 good and 3 bad records and expects exactly 32
+  enriched and 3 dead-lettered; `DetectIT` sends a burst twice and expects one alert; `IndexIT`
   sends everything twice and counts documents.
 - The first version committed a transaction per record (`ack-mode: record`). The first load run measured
   about 65 events per second on the enrich stage, with `sendOffsetsToTransaction` and the commit taking
