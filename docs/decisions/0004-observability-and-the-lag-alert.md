@@ -18,9 +18,10 @@ known to fire.
 - Consumer lag comes from `kafka-exporter` (`kafka_consumergroup_lag` per group, topic, partition) rather
   than from each client's own metrics, so a stalled or crashed consumer still shows lag.
 - Seven Prometheus rules (`observability/alert_rules.yml`): lag above 50,000 for two minutes, a group with
-  lag whose offsets stop moving, dead-letter rate, ingest rejection share, detection latency p95, index
-  failures, service down. `alerts_test.yml` holds promtool unit tests with synthetic series proving each
-  fires at the intended level and stays quiet below it; CI runs them.
+  lag whose offsets stop moving, dead-letter rate (enrich's and detect's together; a document index
+  refuses raises the index-failures rule whether or not it is dead-lettered), ingest rejection share,
+  detection latency p95, index failures, service down. `alerts_test.yml` holds promtool unit tests with
+  synthetic series proving each fires at the intended level and stays quiet below it; CI runs them.
 - Logs are JSON lines (Logstash encoder) with the service name; the Grafana dashboard
   (`threat-pipeline.json`) is provisioned by compose with throughput by stage, lag by group, detection
   latency percentiles, alerts by rule, DLQ and rejection panels.

@@ -13,6 +13,7 @@ import io.github.tajaddin.threat.common.Topics;
 import io.github.tajaddin.threat.detect.engine.DetectionEngine;
 import io.github.tajaddin.threat.detect.rules.CompiledRule;
 import io.github.tajaddin.threat.detect.rules.RuleLoader;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -64,6 +65,7 @@ class DetectFailurePolicyTest {
       """;
 
   @Autowired EmbeddedKafkaBroker broker;
+  @Autowired MeterRegistry registry;
   @MockitoBean RuleService rules;
   @MockitoBean AlertRepository alerts;
 
@@ -111,6 +113,8 @@ class DetectFailurePolicyTest {
     assertThat(Json.read(dead.value(), EnrichedEvent.class).event().id()).isEqualTo("poison-1");
     assertThat(header(dead, Topics.HEADER_ERROR_STAGE)).isEqualTo("detect");
     assertThat(header(dead, Topics.HEADER_ERROR)).contains("not numeric");
+    assertThat(registry.get("detect.events").tag("outcome", "dlq").counter().count())
+        .isEqualTo(1.0);
   }
 
   private static Event firewall(String id) {

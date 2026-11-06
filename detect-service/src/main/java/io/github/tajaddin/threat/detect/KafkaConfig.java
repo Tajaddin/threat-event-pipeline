@@ -1,7 +1,10 @@
 package io.github.tajaddin.threat.detect;
 
 import io.github.tajaddin.threat.common.Topics;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.springframework.context.annotation.Bean;
@@ -15,6 +18,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.listener.ListenerExecutionFailedException;
+import org.springframework.kafka.listener.RetryListener;
 import org.springframework.util.backoff.BackOff;
 import org.springframework.util.backoff.ExponentialBackOff;
 import org.springframework.util.backoff.FixedBackOff;
@@ -24,13 +28,14 @@ import org.springframework.util.backoff.FixedBackOff;
  * redelivered after a pause that grows from one second to thirty and never gives up, so an outage
  * delays alerts but loses none. Any other failure belongs to the record (or to a rule it trips): it
  * is tried three times a second apart, then published to events.dlq with the error and stage in
- * headers, and the partition moves on.
+ * headers, counted as {@code detect.events{outcome=dlq}}, and the partition moves on.
  */
 @Configuration
 public class KafkaConfig {
 
   @Bean
-  public DefaultErrorHandler errorHandler(KafkaTemplate<String, String> template) {
+  public DefaultErrorHandler errorHandler(
+      KafkaTemplate<String, String> template, MeterRegistry registry) {
     DeadLetterPublishingRecoverer recoverer =
         new DeadLetterPublishingRecoverer(
             template, (record, ex) -> new TopicPartition(Topics.DLQ, -1));
@@ -46,6 +51,18 @@ public class KafkaConfig {
     DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, new FixedBackOff(1000L, 2));
     BackOff untilAvailable = untilAvailable();
     handler.setBackOffFunction((record, ex) -> environmental(ex) ? untilAvailable : null);
+    Counter deadLettered =
+        Counter.builder("detect.events").tag("outcome", "dlq").register(registry);
+    handler.setRetryListeners(
+        new RetryListener() {
+          @Override
+          public void failedDelivery(ConsumerRecord<?, ?> record, Exception ex, int attempt) {}
+
+          @Override
+          public void recovered(ConsumerRecord<?, ?> record, Exception ex) {
+            deadLettered.increment();
+          }
+        });
     return handler;
   }
 

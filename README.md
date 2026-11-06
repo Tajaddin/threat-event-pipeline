@@ -151,7 +151,7 @@ records) is what produced the table above; the change and the measurement are re
   the next one indexed. `IndexListenerTest` checks that a 429 or 5xx retries the batch and dead-letters
   nothing.
 - `RuleEngineTest` covers the parser, the modifiers, the condition grammar, and the window arithmetic.
-- The alert rules have promtool unit tests (`observability/alerts_test.yml`): eight scenarios, including the
+- The alert rules have promtool unit tests (`observability/alerts_test.yml`): nine scenarios, including the
   consumer-lag alert firing after two minutes above the threshold and staying quiet below it.
 
 ## Running it
@@ -202,7 +202,7 @@ alert is logged with its rule, severity, key, event count and latency.
 ## Observability
 
 - Micrometer counters and timers per stage: `ingest_events_total{outcome}`, `enrich_events_total{outcome}`,
-  `enrich_batch_size`, `detect_events_total`, `detect_alerts_total{rule,severity}`,
+  `enrich_batch_size`, `detect_events_total{outcome}`, `detect_alerts_total{rule,severity}`,
   `detect_latency_seconds` (ingest to alert, histogram), `index_documents_total{kind}`, plus the Kafka client
   metrics and JVM metrics Spring Boot exposes.
 - `kafka-exporter` publishes `kafka_consumergroup_lag` per group and partition; Grafana's dashboard
@@ -220,7 +220,7 @@ alert is logged with its rule, severity, key, event count and latency.
 | JUnit integration tests with Testcontainers (Kafka, Postgres, OpenSearch) | 8 | `mvn verify`, failsafe |
 | Angular unit tests (Karma, headless Chromium) | 3 | `npx ng test` |
 | Playwright end to end against the Compose stack | 1 | `npx playwright test` |
-| promtool alert-rule tests | 8 scenarios | `make alerts-test` |
+| promtool alert-rule tests | 9 scenarios | `make alerts-test` |
 | Helm | lint and template (14 objects) | `make helm-lint` |
 
 GitHub Actions (`.github/workflows/ci.yml`) runs seven jobs on every push and pull request: `java` (Spotless

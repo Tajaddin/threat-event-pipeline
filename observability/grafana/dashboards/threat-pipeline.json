@@ -34,7 +34,7 @@
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] } },
     { "id": 5, "type": "stat", "title": "Dead-lettered (1h)", "gridPos": { "x": 0, "y": 16, "w": 6, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [{ "refId": "A", "expr": "sum(increase(enrich_events_total{outcome=\"dlq\"}[1h]))" }],
+      "targets": [{ "refId": "A", "expr": "(sum(increase(enrich_events_total{outcome=\"dlq\"}[1h])) or vector(0)) + (sum(increase(detect_events_total{outcome=\"dlq\"}[1h])) or vector(0))" }],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] } },
     { "id": 6, "type": "stat", "title": "Ingest rejections share (5m)", "gridPos": { "x": 6, "y": 16, "w": 6, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
