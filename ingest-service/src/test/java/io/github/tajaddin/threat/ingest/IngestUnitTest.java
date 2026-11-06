@@ -14,11 +14,15 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.producer.BufferExhaustedException;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.BindException;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.core.KafkaProducerException;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -33,7 +37,7 @@ class IngestUnitTest {
     when(kafka.send(any(ProducerRecord.class)))
         .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
     IngestProperties props =
-        new IngestProperties(List.of(), 1000, 100, Duration.ofMinutes(1), 1000);
+        new IngestProperties(List.of(), false, 1000, 100, Duration.ofMinutes(1), 1000);
     IngestService service = new IngestService(kafka, props, new SimpleMeterRegistry());
     List<Event> events = new SyntheticEvents(1, 0, "t").batch(Instant.now(), 5);
 
@@ -49,7 +53,7 @@ class IngestUnitTest {
 
   private static IngestService service(KafkaTemplate<String, String> kafka) {
     IngestProperties props =
-        new IngestProperties(List.of(), 1000, 100, Duration.ofMinutes(1), 1000);
+        new IngestProperties(List.of(), false, 1000, 100, Duration.ofMinutes(1), 1000);
     return new IngestService(kafka, props, new SimpleMeterRegistry());
   }
 
@@ -119,7 +123,8 @@ class IngestUnitTest {
   @Test
   void rateLimiterCountsEventsNotRequests() {
     RateLimiter limiter =
-        new RateLimiter(new IngestProperties(List.of("k"), 100, 100, Duration.ofMinutes(1), 1000));
+        new RateLimiter(
+            new IngestProperties(List.of("k"), false, 100, 100, Duration.ofMinutes(1), 1000));
     assertThat(limiter.tryConsume("k", 60)).isTrue();
     assertThat(limiter.tryConsume("k", 60)).isFalse();
     assertThat(limiter.tryConsume("other", 60)).isTrue();
@@ -134,9 +139,31 @@ class IngestUnitTest {
 
   @Test
   void propertiesHaveSafeDefaults() {
-    IngestProperties p = new IngestProperties(null, 0, 0, null, 0);
+    IngestProperties p = new IngestProperties(null, false, 0, 0, null, 0);
     assertThat(p.apiKeys()).isEmpty();
     assertThat(p.maxBatch()).isEqualTo(1000);
     assertThat(p.dedupWindow()).isEqualTo(Duration.ofMinutes(10));
+  }
+
+  private static IngestProperties bind(Map<String, String> source) {
+    return new Binder(new MapConfigurationPropertySource(source))
+        .bindOrCreate("ingest", IngestProperties.class);
+  }
+
+  @Test
+  void blankEntriesInTheKeyListAreNotKeys() {
+    assertThat(bind(Map.of("ingest.api-keys", "k1, ,k2,")).apiKeys()).containsExactly("k1", "k2");
+  }
+
+  @Test
+  void requiredKeysStopStartUpWhenNoneIsSet() {
+    for (String keys : List.of("", " , ")) {
+      assertThatThrownBy(
+              () -> bind(Map.of("ingest.require-api-keys", "true", "ingest.api-keys", keys)))
+          .isInstanceOf(BindException.class)
+          .hasRootCauseMessage("ingest.require-api-keys is set but ingest.api-keys holds no key");
+    }
+    assertThat(bind(Map.of("ingest.require-api-keys", "true", "ingest.api-keys", "k1")).apiKeys())
+        .containsExactly("k1");
   }
 }

@@ -19,7 +19,8 @@ import org.springframework.security.web.authentication.AnonymousAuthenticationFi
  * {@code detect.api-keys}; probes, metrics and the API docs are open; anything else is refused.
  * Matching uses the normalised path Spring MVC routes on. The console's proxy adds the key on the
  * server side, so it never reaches a browser. An empty key list leaves {@code /api/**} open, which
- * is for local development only.
+ * is for local development only; with {@code detect.require-api-keys} the service does not start
+ * without a key.
  */
 @Configuration
 public class SecurityConfig {

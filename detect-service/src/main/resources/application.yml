@@ -44,6 +44,7 @@ detect:
   max-event-ids-per-alert: 50
   cors-origins: ${DETECT_CORS_ORIGINS:http://localhost:4200}
   api-keys: ${DETECT_API_KEYS:}
+  require-api-keys: ${DETECT_REQUIRE_API_KEYS:false}
   concurrency: ${DETECT_CONCURRENCY:3}
 
 server:

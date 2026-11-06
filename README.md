@@ -232,16 +232,19 @@ Playwright, a short load run), `alerts` (promtool), `helm` (lint and template), 
 
 - `X-API-Key` on the ingest and detect APIs, enforced by Spring Security on the normalised request path, so
   `/api;x/events` or `/%61pi/events` cannot skip it, and every path not explicitly opened is refused. The
-  console's proxy adds detect's key on the server side, so it never reaches a browser. A token bucket per
-  ingest key (bucket4j). An empty key list is allowed only for local development and the `.env.example` says
-  so.
+  console's proxy adds detect's key on the server side, so it never reaches a browser; the console has no
+  login of its own and acts with that key, so expose it only on localhost (as Compose does) or behind an
+  authenticating proxy. A token bucket per ingest key (bucket4j). An empty key list leaves an API open, which
+  is for local development only (the `.env.example` says so); the Helm chart sets `INGEST_REQUIRE_API_KEYS`
+  and `DETECT_REQUIRE_API_KEYS`, so on Kubernetes ingest and detect refuse to start without a key.
 - Every inbound field is validated by size, pattern and range before it is produced, and source and
   destination addresses must be IPv4 or IPv6 literals; detect and index never trust a record's shape either.
 - No secrets in the repository: `.env` is ignored, passwords and keys come from the environment or, on
   Kubernetes, from Secrets referenced by the chart; `gitleaks` runs in CI.
 - Images run as non-root users (the services on `eclipse-temurin:21-jre-alpine`, the console on
   `nginx-unprivileged`); every pod runs with a read-only root filesystem and dropped capabilities, and a
-  NetworkPolicy limits who reaches the services. The chart refuses to render without the API key Secrets.
+  NetworkPolicy limits who reaches the services. The API key Secrets are not optional: the ingest, detect
+  and console pods do not start without them.
 - Dependencies are pinned in `pom.xml` and `package-lock.json` and updated by Dependabot.
 
 ## Kubernetes

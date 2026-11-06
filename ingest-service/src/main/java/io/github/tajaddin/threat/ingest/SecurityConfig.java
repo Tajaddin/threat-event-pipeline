@@ -17,7 +17,8 @@ import org.springframework.security.web.authentication.AnonymousAuthenticationFi
  * and its firewall rejects path parameters and encoded separators, so {@code /api;x/events} or
  * {@code /%61pi/events} cannot reach a controller without the key. Probes, metrics and the API docs
  * are open; anything not listed is refused. An empty key list leaves {@code /api/**} open, which is
- * for local development only.
+ * for local development only; with {@code ingest.require-api-keys} the service does not start
+ * without a key.
  */
 @Configuration
 public class SecurityConfig {

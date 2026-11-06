@@ -41,7 +41,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"ingest.api-keys=test-key", "spring.kafka.bootstrap-servers=127.0.0.1:1"})
+    properties = {"ingest.api-keys=test-key,", "spring.kafka.bootstrap-servers=127.0.0.1:1"})
 @AutoConfigureObservability
 class IngestHttpTest {
   private static final HttpClient HTTP = HttpClient.newHttpClient();
@@ -100,6 +100,14 @@ class IngestHttpTest {
   @Test
   void wrongKeyIsRejected() throws Exception {
     assertThat(send("POST", "/api/events", oneEvent(2), "not-the-key").statusCode()).isEqualTo(401);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void emptyKeyIsRejectedThoughTheKeyListEndsInAComma() throws Exception {
+    kafkaAccepts();
+    assertThat(send("POST", "/api/events", oneEvent(5), "").statusCode()).isEqualTo(401);
+    verify(kafka, never()).send(any(ProducerRecord.class));
   }
 
   @Test

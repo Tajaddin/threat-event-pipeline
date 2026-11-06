@@ -1,6 +1,7 @@
 {{- include "tep.javaService" (dict "root" . "name" "ingest-service" "cfg" .Values.ingest "extraEnv" (list
   (dict "name" "INGEST_RATE_LIMIT_PER_MINUTE" "value" (.Values.ingest.rateLimitPerMinute | toString))
   (dict "name" "INGEST_API_KEYS" "valueFrom" (dict "secretKeyRef" (dict "name" (required "ingest.apiKeysSecret must name a Secret with key apiKeys" .Values.ingest.apiKeysSecret) "key" "apiKeys")))
+  (dict "name" "INGEST_REQUIRE_API_KEYS" "value" "true")
 )) }}
 ---
 {{ include "tep.javaService" (dict "root" . "name" "enrich-service" "cfg" .Values.enrich "extraEnv" (list
@@ -14,6 +15,7 @@
   (dict "name" "DETECT_CORS_ORIGINS" "value" .Values.detect.corsOrigins)
   (dict "name" "DETECT_RULES_DIR" "value" "/rules")
   (dict "name" "DETECT_API_KEYS" "valueFrom" (dict "secretKeyRef" (dict "name" (required "detect.apiKeySecret must name a Secret with key apiKey" .Values.detect.apiKeySecret) "key" "apiKey")))
+  (dict "name" "DETECT_REQUIRE_API_KEYS" "value" "true")
 ) "volumes" (list (dict "name" "rules" "configMap" (dict "name" (printf "%s-rules" .Release.Name))))
    "volumeMounts" (list (dict "name" "rules" "mountPath" "/rules" "readOnly" true))) }}
 ---

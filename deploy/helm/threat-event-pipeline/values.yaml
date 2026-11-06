@@ -25,8 +25,8 @@ clusterDomain: cluster.local
 
 ingest:
   replicas: 2
-  # name of a Secret with key `apiKeys` (comma-separated X-API-Key values); required, the chart never
-  # deploys an open API
+  # name of a Secret with key `apiKeys` (comma-separated X-API-Key values); required: the pod does not
+  # start without the Secret, and ingest refuses to start when it holds no key
   apiKeysSecret: threat-ingest-keys
   rateLimitPerMinute: 600000
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
@@ -43,7 +43,8 @@ detect:
   # across replicas; see the README's Limitations. Scale with `concurrency` (up to the partition count).
   replicas: 1
   concurrency: 3
-  # name of a Secret with key `apiKey`: detect requires it in X-API-Key, and the console's proxy sends it
+  # name of a Secret with key `apiKey`: detect requires it in X-API-Key, and the console's proxy sends it;
+  # required in the same way as ingest's
   apiKeySecret: threat-detect-key
   corsOrigins: "https://console.example.com"
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
