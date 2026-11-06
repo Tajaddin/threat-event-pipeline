@@ -216,8 +216,8 @@ alert is logged with its rule, severity, key, event count and latency.
 
 | Suite | Count | Runs where |
 |---|---|---|
-| JUnit unit tests (`common`, `ingest`, `detect` rule engine) | 16 | `mvn verify`, surefire |
-| JUnit integration tests with Testcontainers (Kafka, Postgres, OpenSearch) | 7 | `mvn verify`, failsafe |
+| JUnit unit tests, including HTTP tests on a real Tomcat and failure-policy tests on an in-process Kafka broker | 81 | `mvn verify`, surefire |
+| JUnit integration tests with Testcontainers (Kafka, Postgres, OpenSearch) | 8 | `mvn verify`, failsafe |
 | Angular unit tests (Karma, headless Chromium) | 3 | `npx ng test` |
 | Playwright end to end against the Compose stack | 1 | `npx playwright test` |
 | promtool alert-rule tests | 8 scenarios | `make alerts-test` |
