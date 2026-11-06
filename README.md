@@ -216,7 +216,7 @@ alert is logged with its rule, severity, key, event count and latency.
 
 | Suite | Count | Runs where |
 |---|---|---|
-| JUnit unit tests, including HTTP tests on a real Tomcat and failure-policy tests on an in-process Kafka broker | 81 | `mvn verify`, surefire |
+| JUnit unit tests, including HTTP tests on a real Tomcat and failure-policy tests on an in-process Kafka broker | 92 | `mvn verify`, surefire |
 | JUnit integration tests with Testcontainers (Kafka, Postgres, OpenSearch) | 8 | `mvn verify`, failsafe |
 | Angular unit tests (Karma, headless Chromium) | 3 | `npx ng test` |
 | Playwright end to end against the Compose stack | 1 | `npx playwright test` |
