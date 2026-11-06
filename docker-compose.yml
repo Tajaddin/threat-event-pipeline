@@ -183,7 +183,7 @@ services:
     environment:
       DETECT_API_KEY: ${DETECT_API_KEY:-}
     ports:
-      - "${CONSOLE_PORT:-4200}:80"
+      - "${CONSOLE_PORT:-4200}:8080"
     depends_on: [detect-service, ingest-service]
     restart: unless-stopped
 

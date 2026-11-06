@@ -84,7 +84,7 @@ content is redistributed.
 | 5 | Angular console + Playwright | done: lint, 3 unit tests, production build, e2e against compose |
 | 6 | Observability | done: 7 alert rules with 8 promtool tests, Grafana dashboard, kafka-exporter lag |
 | 7 | Load run | done: numbers and method in the README |
-| 8 | Helm chart, CI, Dependabot | done: chart lints and renders 15 objects; CI runs Maven verify with Testcontainers, console checks, compose e2e, promtool, helm, gitleaks, images |
+| 8 | Helm chart, CI, Dependabot | done: chart lints and renders 14 objects; CI runs Maven verify with Testcontainers, console checks, compose e2e, promtool, helm, gitleaks, images |
 | 9 | README, ADRs | done, 5 ADRs |
 
 ## Cost

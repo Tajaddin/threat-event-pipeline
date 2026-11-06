@@ -1,8 +1,8 @@
 # Rendered by the nginx image's envsubst at start-up into /etc/nginx/conf.d/default.conf.
-# Only the variables 10-template-env.envsh exports are substituted (DNS_RESOLVER, DETECT_API_KEY); nginx's
-# own $variables are not environment variables and stay as they are.
+# Only the variables 10-template-env.envsh exports are substituted (DNS_RESOLVER, the three upstreams,
+# DETECT_API_KEY); nginx's own $variables are not environment variables and stay as they are.
 server {
-  listen 80;
+  listen 8080;
   server_name _;
   root /usr/share/nginx/html;
   index index.html;
@@ -14,9 +14,9 @@ server {
   # Resolve upstream names per request (re-checked every 10 s) instead of once at start-up: a recreated
   # service container gets a new address, and a name resolved at start-up would keep pointing at the old one.
   resolver ${DNS_RESOLVER} valid=10s ipv6=off;
-  set $detect http://detect-service:8080;
-  set $ingest http://ingest-service:8080;
-  set $prom http://prometheus:9090;
+  set $detect ${DETECT_UPSTREAM};
+  set $ingest ${INGEST_UPSTREAM};
+  set $prom ${PROMETHEUS_UPSTREAM};
 
   location /api/detect/ {
     rewrite ^/api/detect/(.*)$ /api/$1 break;

@@ -19,21 +19,32 @@ postgres:
 opensearch:
   url: http://opensearch-cluster-master.opensearch.svc:9200
 
+# the console's nginx resolves upstreams itself and does not use the pod's DNS search path, so it needs
+# fully qualified service names
+clusterDomain: cluster.local
+
 ingest:
   replicas: 2
-  # name of a Secret with key `apiKeys` (comma-separated); leave empty for an open API (dev only)
+  # name of a Secret with key `apiKeys` (comma-separated X-API-Key values); required, the chart never
+  # deploys an open API
   apiKeysSecret: threat-ingest-keys
   rateLimitPerMinute: 600000
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
 
 enrich:
+  # each pod's transactional id prefix includes its pod name, so replicas never fence each other
   replicas: 2
   concurrency: 3
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
 
 detect:
-  replicas: 2
+  # One replica. Threshold windows live in each instance's memory and events are partitioned by source
+  # address, so a rule that groups by another field (lateral movement groups by user) would under-count
+  # across replicas; see the README's Limitations. Scale with `concurrency` (up to the partition count).
+  replicas: 1
   concurrency: 3
+  # name of a Secret with key `apiKey`: detect requires it in X-API-Key, and the console's proxy sends it
+  apiKeySecret: threat-detect-key
   corsOrigins: "https://console.example.com"
   resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 768Mi } }
   # extra rules mounted at /rules; keys are file names
@@ -46,9 +57,13 @@ index:
 
 console:
   replicas: 1
+  # Prometheus for the pipeline tab's rates and lag (kube-prometheus-stack's service by default)
+  prometheusUrl: http://prometheus-operated.monitoring.svc.cluster.local:9090
   resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
 
 ingress:
+  # The console has no login of its own and its proxy holds detect's key: expose it only behind an
+  # authenticating proxy (for example oauth2-proxy through the ingress controller's auth annotations).
   enabled: false
   className: nginx
   host: console.example.com

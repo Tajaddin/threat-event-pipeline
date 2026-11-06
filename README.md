@@ -221,7 +221,7 @@ alert is logged with its rule, severity, key, event count and latency.
 | Angular unit tests (Karma, headless Chromium) | 3 | `npx ng test` |
 | Playwright end to end against the Compose stack | 1 | `npx playwright test` |
 | promtool alert-rule tests | 8 scenarios | `make alerts-test` |
-| Helm | lint and template (15 objects) | `make helm-lint` |
+| Helm | lint and template (14 objects) | `make helm-lint` |
 
 GitHub Actions (`.github/workflows/ci.yml`) runs seven jobs on every push and pull request: `java` (Spotless
 check, `mvn verify` with JaCoCo), `console` (lint, unit tests, production build), `e2e` (Compose stack,
@@ -239,16 +239,19 @@ Playwright, a short load run), `alerts` (promtool), `helm` (lint and template), 
   destination addresses must be IPv4 or IPv6 literals; detect and index never trust a record's shape either.
 - No secrets in the repository: `.env` is ignored, passwords and keys come from the environment or, on
   Kubernetes, from Secrets referenced by the chart; `gitleaks` runs in CI.
-- Images run as a non-root user on `eclipse-temurin:21-jre-alpine`; pods run with a read-only root filesystem,
-  dropped capabilities, a NetworkPolicy and a PodDisruptionBudget for detect.
+- Images run as non-root users (the services on `eclipse-temurin:21-jre-alpine`, the console on
+  `nginx-unprivileged`); every pod runs with a read-only root filesystem and dropped capabilities, and a
+  NetworkPolicy limits who reaches the services. The chart refuses to render without the API key Secrets.
 - Dependencies are pinned in `pom.xml` and `package-lock.json` and updated by Dependabot.
 
 ## Kubernetes
 
 `deploy/helm/threat-event-pipeline` deploys the four services and the console with readiness and liveness
 probes, rolling updates with zero unavailable, resource requests and limits, an optional Ingress and an
-optional ServiceMonitor; Kafka, Postgres and OpenSearch are external and configured in `values.yaml`. The chart
-lints and renders 15 objects in CI. `docs/DEPLOY.md` has the install commands.
+optional ServiceMonitor; Kafka, Postgres and OpenSearch are external and configured in `values.yaml`. Both API
+key Secrets are required, each enrich pod gets its own transactional id prefix (its pod name), and detect runs
+one replica (see Limitations). The chart lints and renders 14 objects in CI. `docs/DEPLOY.md` has the install
+commands.
 
 ## Limitations
 
@@ -256,8 +259,8 @@ lints and renders 15 objects in CI. `docs/DEPLOY.md` has the install commands.
   generator itself, so it reports where this stack saturates here, not the services' ceilings.
 - Threshold windows live in each detect instance's memory (Caffeine, bounded by `max-windows`). One instance
   with three consumer threads sees every key; two instances would each see the partitions they own, so a rule
-  grouping by a field other than the partition key (source address) would under-count across instances. A
-  state store (Kafka Streams or Flink) is the next step.
+  grouping by a field other than the partition key (source address) would under-count across instances, which
+  is why the Helm chart deploys one detect replica. A state store (Kafka Streams or Flink) is the next step.
 - Ingest de-duplication is per instance and in memory; two replicas could each accept the same event id, and
   so could two concurrent requests to one instance, because an id is remembered only once Kafka acknowledged
   it (the trade that keeps a failed batch retryable).

@@ -1,16 +1,19 @@
 {{- include "tep.javaService" (dict "root" . "name" "ingest-service" "cfg" .Values.ingest "extraEnv" (list
   (dict "name" "INGEST_RATE_LIMIT_PER_MINUTE" "value" (.Values.ingest.rateLimitPerMinute | toString))
-  (dict "name" "INGEST_API_KEYS" "valueFrom" (dict "secretKeyRef" (dict "name" .Values.ingest.apiKeysSecret "key" "apiKeys" "optional" true)))
+  (dict "name" "INGEST_API_KEYS" "valueFrom" (dict "secretKeyRef" (dict "name" (required "ingest.apiKeysSecret must name a Secret with key apiKeys" .Values.ingest.apiKeysSecret) "key" "apiKeys")))
 )) }}
 ---
 {{ include "tep.javaService" (dict "root" . "name" "enrich-service" "cfg" .Values.enrich "extraEnv" (list
   (dict "name" "ENRICH_CONCURRENCY" "value" (.Values.enrich.concurrency | toString))
+  (dict "name" "POD_NAME" "valueFrom" (dict "fieldRef" (dict "fieldPath" "metadata.name")))
+  (dict "name" "ENRICH_TX_PREFIX" "value" "enrich-tx-$(POD_NAME)-")
 )) }}
 ---
 {{ include "tep.javaService" (dict "root" . "name" "detect-service" "cfg" .Values.detect "extraEnv" (list
   (dict "name" "DETECT_CONCURRENCY" "value" (.Values.detect.concurrency | toString))
   (dict "name" "DETECT_CORS_ORIGINS" "value" .Values.detect.corsOrigins)
   (dict "name" "DETECT_RULES_DIR" "value" "/rules")
+  (dict "name" "DETECT_API_KEYS" "valueFrom" (dict "secretKeyRef" (dict "name" (required "detect.apiKeySecret must name a Secret with key apiKey" .Values.detect.apiKeySecret) "key" "apiKey")))
 ) "volumes" (list (dict "name" "rules" "configMap" (dict "name" (printf "%s-rules" .Release.Name))))
    "volumeMounts" (list (dict "name" "rules" "mountPath" "/rules" "readOnly" true))) }}
 ---
