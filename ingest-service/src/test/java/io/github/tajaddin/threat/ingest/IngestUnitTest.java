@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.producer.BufferExhaustedException;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.TimeoutException;
@@ -96,6 +97,30 @@ class IngestUnitTest {
         .thenReturn(sent());
     IngestService service = service(kafka);
     List<Event> events = new SyntheticEvents(3, 0, "t").batch(Instant.now(), 2);
+
+    assertThatThrownBy(() -> service.accept(events))
+        .isInstanceOf(IngestService.ProducerBackpressureException.class);
+    IngestService.Result retry = service.accept(events);
+
+    assertThat(retry.accepted()).isEqualTo(1);
+    assertThat(retry.duplicates()).isEqualTo(1);
+    verify(kafka, times(3)).send(any(ProducerRecord.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void sendThatThrowsMidBatchWaitsForTheEarlierOnesAndRemembersThem() {
+    KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+    CompletableFuture<SendResult<String, String>> inFlight =
+        CompletableFuture.supplyAsync(
+            () -> mock(SendResult.class),
+            CompletableFuture.delayedExecutor(300, TimeUnit.MILLISECONDS));
+    when(kafka.send(any(ProducerRecord.class)))
+        .thenReturn(inFlight)
+        .thenThrow(new KafkaException("Send failed", new BufferExhaustedException("buffer full")))
+        .thenReturn(sent());
+    IngestService service = service(kafka);
+    List<Event> events = new SyntheticEvents(6, 0, "t").batch(Instant.now(), 2);
 
     assertThatThrownBy(() -> service.accept(events))
         .isInstanceOf(IngestService.ProducerBackpressureException.class);

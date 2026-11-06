@@ -70,7 +70,8 @@ public class IngestService {
    * Produces the batch; returns once every record is acknowledged (acks=all) or throws on failure.
    * An id is remembered for de-duplication only once its record is acknowledged, so a batch that
    * failed can be retried in full: the records that did reach Kafka count as duplicates, the rest
-   * are produced.
+   * are produced. When a send throws, the ones issued before it are still in flight, so they are
+   * awaited (no longer than the producer's delivery timeout) before the acknowledged ids are read.
    */
   public Result accept(List<Event> events) {
     Instant now = Instant.now();
@@ -91,9 +92,12 @@ public class IngestService {
       }
       CompletableFuture.allOf(sends.values().toArray(CompletableFuture[]::new)).join();
     } catch (RuntimeException ex) {
+      CompletableFuture.allOf(sends.values().toArray(CompletableFuture[]::new))
+          .handle((ignored, failure) -> null)
+          .join();
       int acknowledged = 0;
       for (var send : sends.entrySet()) {
-        if (send.getValue().isDone() && !send.getValue().isCompletedExceptionally()) {
+        if (!send.getValue().isCompletedExceptionally()) {
           seen.put(send.getKey(), Boolean.TRUE);
           acknowledged++;
         }
