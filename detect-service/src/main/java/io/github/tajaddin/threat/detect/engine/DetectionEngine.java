@@ -24,8 +24,9 @@ import java.util.stream.Collectors;
  * count (or distinct value count) reaches the threshold within the tumbling window. Windows are
  * keyed by the event's own timestamp, so replayed or out-of-order events land in the right window.
  * The alert id is derived from (rule, key, window), which makes alert storage idempotent across
- * restarts and redeliveries. A redelivered event is not counted again, and one that counted towards
- * an alert that already fired returns that alert again (see {@link WindowState}).
+ * restarts and redeliveries. A redelivered event does not count towards a threshold twice, and the
+ * event that fired a window returns its alert again when it is redelivered (see {@link
+ * WindowState}).
  */
 public final class DetectionEngine {
   private final AtomicReference<List<CompiledRule>> rules = new AtomicReference<>(List.of());
@@ -89,9 +90,9 @@ public final class DetectionEngine {
       String eventId = enriched.event().id();
       Alert alert = null;
       synchronized (state) {
-        if (state.counted.contains(eventId)) {
+        if (eventId.equals(state.firedBy)) {
           alert = state.alert;
-        } else if (state.alert == null) {
+        } else if (state.alert == null && !state.counted.contains(eventId)) {
           state.count++;
           state.lastSeen = eventTime.isAfter(state.lastSeen) ? eventTime : state.lastSeen;
           state.firstSeen = eventTime.isBefore(state.firstSeen) ? eventTime : state.firstSeen;
@@ -121,6 +122,7 @@ public final class DetectionEngine {
                     now,
                     latency,
                     summary(rule, flat, state.count));
+            state.firedBy = eventId;
             alert = state.alert;
           }
         }
@@ -153,9 +155,13 @@ public final class DetectionEngine {
 
   /**
    * {@code counted} holds the ids of the events that moved the measure before the window fired (at
-   * most the threshold), so a redelivered event is not counted twice; when one of them comes back
-   * after the alert fired, the same alert is returned again, so a caller whose store or send failed
-   * can finish the job. {@code alert} is set once, when the window fires.
+   * most the threshold), so a redelivered event cannot stand in for a new one. {@code alert} and
+   * {@code firedBy} are set once, when the window fires; when the firing event comes back, the same
+   * alert is returned again, so a caller whose store or send failed can finish the job, while a
+   * replay of the other counted events returns nothing. For a distinct-count rule, an event that
+   * repeated a value already seen is not remembered (the window would otherwise hold an id for
+   * every matching event until it fires), so its redelivery adds to the alert's event count, never
+   * to the distinct measure.
    */
   static final class WindowState {
     final Instant windowStart;
@@ -164,6 +170,7 @@ public final class DetectionEngine {
     Instant lastSeen;
     Instant firstIngestedAt = Instant.MAX;
     Alert alert;
+    String firedBy;
     final Set<String> eventIds = new LinkedHashSet<>();
     final Set<String> counted = new HashSet<>();
     final Set<String> distinct = new HashSet<>();

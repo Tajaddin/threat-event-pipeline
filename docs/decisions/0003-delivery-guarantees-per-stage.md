@@ -25,12 +25,15 @@ sink, so each gets the guarantee its sink can honour.
   thirty, indefinitely, so an outage dead-letters nothing.
 - **detect**: at-least-once with manual acknowledgement after the alert is stored and its send to `alerts`
   is acknowledged; alert ids are deterministic and the store upserts, so redelivery is harmless (tested by
-  producing the same burst twice). Each threshold window keeps the ids of the events it counted, so a
-  redelivered event is not counted again, and one that counted towards an alert that already fired returns
-  that alert again: when storing or producing it failed, the retry finishes the job. A database or broker
-  failure is retried with back-off from one second to thirty, indefinitely; any other failure (a rule that
-  throws on an event, say) is tried three times and the event goes to `events.dlq` with `error-stage`
-  `detect`.
+  producing the same burst twice). Each threshold window keeps the ids of the events that moved its
+  measure, so a redelivered event does not count towards the threshold again, and the id of the event that
+  fired it: when that event comes back because storing or producing the alert failed, the alert is
+  returned again and the retry finishes the job, while a replay of the earlier events raises nothing. A
+  distinct-count rule does not remember events that repeated a value it had already seen (that would keep
+  an id per matching event until the window fires), so their redelivery can add to the alert's event
+  count, never to the distinct measure. A database or broker failure is retried with back-off from one
+  second to thirty, indefinitely; any other failure (a rule that throws on an event, say) is tried three
+  times and the event goes to `events.dlq` with `error-stage` `detect`.
 - **index**: batch consumer, one bulk request per poll, documents keyed by their ids so a redelivered
   batch overwrites rather than duplicates; a failed bulk, or any document refused with 429 or a 5xx,
   throws, and the batch is redelivered with exponential back-off, nothing dropped. A document refused for
