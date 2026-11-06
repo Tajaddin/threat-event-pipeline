@@ -219,8 +219,8 @@ Playwright, a short load run), `alerts` (promtool), `helm` (lint and template), 
   console's proxy adds detect's key on the server side, so it never reaches a browser. A token bucket per
   ingest key (bucket4j). An empty key list is allowed only for local development and the `.env.example` says
   so.
-- Every inbound field is validated by size, pattern and range before it is produced; detect and index never
-  trust a record's shape either.
+- Every inbound field is validated by size, pattern and range before it is produced, and source and
+  destination addresses must be IPv4 or IPv6 literals; detect and index never trust a record's shape either.
 - No secrets in the repository: `.env` is ignored, passwords and keys come from the environment or, on
   Kubernetes, from Secrets referenced by the chart; `gitleaks` runs in CI.
 - Images run as a non-root user on `eclipse-temurin:21-jre-alpine`; pods run with a read-only root filesystem,

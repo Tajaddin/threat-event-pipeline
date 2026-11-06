@@ -120,6 +120,18 @@ class IngestHttpTest {
   }
 
   @Test
+  void addressThatIsNotAnIpIsRejectedBeforeKafka() throws Exception {
+    kafkaAccepts();
+    String body =
+        "[{\"id\":\"bad-ip-1\",\"timestamp\":\"2026-11-01T00:00:00Z\",\"type\":\"AUTH\","
+            + "\"source\":\"s\",\"srcIp\":\"x\"}]";
+    HttpResponse<String> resp = send("POST", "/api/events", body, "test-key");
+    assertThat(resp.statusCode()).isEqualTo(400);
+    assertThat(resp.body()).contains("srcIp");
+    verify(kafka, never()).send(any(ProducerRecord.class));
+  }
+
+  @Test
   void anythingElseIsRefused() throws Exception {
     assertThat(send("GET", "/internal", null, null).statusCode()).isEqualTo(401);
   }
