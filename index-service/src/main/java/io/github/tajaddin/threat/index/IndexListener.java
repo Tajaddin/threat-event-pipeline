@@ -13,6 +13,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -31,16 +32,24 @@ import org.springframework.stereotype.Component;
 /**
  * Batch consumer: one bulk request per poll, documents keyed by their own ids so a redelivered
  * batch overwrites rather than duplicates. The offset is acknowledged only after every document is
- * either indexed or dead-lettered. A document refused with 429 or a 5xx may go in later, so the
- * batch throws and the container redelivers it with back-off; once only other refusals remain (a
- * 400 mapping conflict, say, which no retry fixes), those documents go to events.dlq with the
- * reason in headers and the batch is acknowledged.
+ * either indexed or dead-lettered. Only a refusal of the document itself (a mapping conflict, which
+ * no retry fixes) is dead-lettered: those documents go to events.dlq with the reason in headers
+ * once no other refusal remains, and the batch is acknowledged. Any other refusal may clear (a 429,
+ * a 5xx, or a refusal of the index or the cluster: a shard limit on a new daily index, a missing
+ * index, a cluster block), so the batch throws and the container redelivers it with back-off rather
+ * than sending every document of the day to the DLQ.
  */
 @Component
 public class IndexListener {
   private static final Logger log = LoggerFactory.getLogger(IndexListener.class);
   private static final DateTimeFormatter DAY =
       DateTimeFormatter.ofPattern("yyyy.MM.dd").withZone(ZoneOffset.UTC);
+  private static final Set<String> DOCUMENT_ERRORS =
+      Set.of(
+          "mapper_parsing_exception",
+          "document_parsing_exception",
+          "strict_dynamic_mapping_exception",
+          "illegal_argument_exception");
 
   private final OpenSearchClient client;
   private final OpenSearchConfig.IndexProperties props;
@@ -126,13 +135,16 @@ public class IndexListener {
     List<BulkResponseItem> items = response.items();
     List<BulkResponseItem> refused = items.stream().filter(i -> i.error() != null).toList();
     failed.increment(refused.size());
-    List<BulkResponseItem> retryable = refused.stream().filter(i -> retryable(i.status())).toList();
+    List<BulkResponseItem> retryable =
+        refused.stream().filter(i -> !refusesTheDocument(i)).toList();
     if (!retryable.isEmpty()) {
       throw new IOException(
           retryable.size()
               + " documents refused for now, first: "
               + retryable.get(0).status()
               + " "
+              + retryable.get(0).error().type()
+              + ": "
               + retryable.get(0).error().reason());
     }
     List<CompletableFuture<?>> sends = new ArrayList<>(refused.size());
@@ -145,8 +157,10 @@ public class IndexListener {
     return ops.size() - refused.size();
   }
 
-  private static boolean retryable(int status) {
-    return status == 429 || status >= 500;
+  private static boolean refusesTheDocument(BulkResponseItem item) {
+    return item.status() < 500
+        && item.status() != 429
+        && DOCUMENT_ERRORS.contains(item.error().type());
   }
 
   private CompletableFuture<?> deadLetter(

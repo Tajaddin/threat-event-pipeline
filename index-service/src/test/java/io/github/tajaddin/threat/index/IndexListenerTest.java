@@ -18,12 +18,15 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.opensearch.client.opensearch.OpenSearchClient;
 import org.opensearch.client.opensearch.core.BulkRequest;
@@ -64,28 +67,31 @@ class IndexListenerTest {
     }
   }
 
-  private void bulkAnswers(int... statuses) throws IOException {
-    List<BulkResponseItem> items = new ArrayList<>();
-    for (int status : statuses) {
-      items.add(
-          BulkResponseItem.of(
-              i -> {
-                i.operationType(OperationType.Index).index("events-2026.10.17").status(status);
-                if (status >= 300) {
-                  i.error(e -> e.type("error_" + status).reason("refused with " + status));
-                }
-                return i;
-              }));
-    }
-    boolean errors = items.stream().anyMatch(i -> i.error() != null);
+  private static BulkResponseItem item(int status, String errorType) {
+    return BulkResponseItem.of(
+        i -> {
+          i.operationType(OperationType.Index).index("events-2026.10.17").status(status);
+          if (errorType != null) {
+            i.error(e -> e.type(errorType).reason("refused with " + status));
+          }
+          return i;
+        });
+  }
+
+  private static BulkResponseItem indexed() {
+    return item(201, null);
+  }
+
+  private void bulkAnswers(BulkResponseItem... items) throws IOException {
+    boolean errors = Arrays.stream(items).anyMatch(i -> i.error() != null);
     when(client.bulk(any(BulkRequest.class)))
-        .thenReturn(BulkResponse.of(b -> b.errors(errors).took(1).items(items)));
+        .thenReturn(BulkResponse.of(b -> b.errors(errors).took(1).items(List.of(items))));
   }
 
   @Test
   @SuppressWarnings("unchecked")
   void documentRefusedFor400IsDeadLetteredAndTheBatchIsAcknowledged() throws Exception {
-    bulkAnswers(201, 400, 201);
+    bulkAnswers(indexed(), item(400, "mapper_parsing_exception"), indexed());
     Acknowledgment ack = mock(Acknowledgment.class);
 
     listener.onEvents(records, ack);
@@ -97,14 +103,17 @@ class IndexListenerTest {
     assertThat(dead.topic()).isEqualTo(Topics.DLQ);
     assertThat(dead.value()).isEqualTo(records.get(1).value());
     assertThat(header(dead, Topics.HEADER_ERROR_STAGE)).isEqualTo("index");
-    assertThat(header(dead, Topics.HEADER_ERROR)).contains("400").contains("error_400");
+    assertThat(header(dead, Topics.HEADER_ERROR)).startsWith("400 mapper_parsing_exception");
     verify(ack).acknowledge();
   }
 
   @Test
   @SuppressWarnings("unchecked")
   void throttledDocumentFailsTheBatchAndNothingIsDeadLettered() throws Exception {
-    bulkAnswers(201, 429, 400);
+    bulkAnswers(
+        indexed(),
+        item(429, "es_rejected_execution_exception"),
+        item(400, "mapper_parsing_exception"));
     Acknowledgment ack = mock(Acknowledgment.class);
 
     assertThatThrownBy(() -> listener.onEvents(records, ack)).isInstanceOf(IOException.class);
@@ -115,10 +124,29 @@ class IndexListenerTest {
 
   @Test
   void serverErrorAlsoFailsTheBatch() throws Exception {
-    bulkAnswers(503, 201, 201);
+    bulkAnswers(item(503, "unavailable_shards_exception"), indexed(), indexed());
     Acknowledgment ack = mock(Acknowledgment.class);
 
     assertThatThrownBy(() -> listener.onEvents(records, ack)).isInstanceOf(IOException.class);
+    verify(ack, never()).acknowledge();
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "400, validation_exception",
+    "404, index_not_found_exception",
+    "403, cluster_block_exception"
+  })
+  @SuppressWarnings("unchecked")
+  void refusalOfTheIndexOrClusterFailsTheBatchAndNothingIsDeadLettered(int status, String type)
+      throws Exception {
+    bulkAnswers(indexed(), item(status, type), indexed());
+    Acknowledgment ack = mock(Acknowledgment.class);
+
+    assertThatThrownBy(() -> listener.onEvents(records, ack))
+        .isInstanceOf(IOException.class)
+        .hasMessageContaining(type);
+    verify(kafka, never()).send(any(ProducerRecord.class));
     verify(ack, never()).acknowledge();
   }
 

@@ -36,7 +36,7 @@ flowchart LR
 | `ingest-service` | `POST /api/events` (batch of validated events), `X-API-Key`, per-key token bucket, produces to `events.raw` keyed by source address; `POST /api/generate` drives synthetic load | idempotent producer, `acks=all`; duplicate event ids dropped for ten minutes, counting an id only once Kafka acknowledged it; 429 when the key's bucket is empty, 503 with `Retry-After` when the producer buffer is full or the broker times out |
 | `enrich-service` | consumes `events.raw`, adds country, ASN and internal flag from `ip_ranges` (inet containment) and owner and criticality from `assets`, produces `events.enriched`; malformed input to `events.dlq` with the error in headers | consume-transform-produce in one Kafka transaction per poll; outputs and offsets commit together, downstream reads `read_committed`; a record that fails on its own is dead-lettered inside the transaction, a database or broker failure rolls the poll back and retries it with back-off |
 | `detect-service` | loads `rules/*.yml` into Postgres, evaluates stateless rules per event and threshold rules over tumbling windows per key, stores and produces `alerts`; REST for alerts, rules and stats | at-least-once: the offset is acknowledged after the alert is stored and its send acknowledged; a redelivered event does not count towards a threshold twice, and the event that fired a window re-emits its alert, whose id is deterministic on (rule, key, window) and which the store upserts; database or broker failures are retried with back-off indefinitely, any other failure three times, then the event goes to `events.dlq` |
-| `index-service` | bulk-indexes `events.enriched` and `alerts` into daily OpenSearch indices | documents keyed by event or alert id; a failed bulk, or documents refused with 429 or a 5xx, are redelivered with exponential back-off; a document refused for any other reason (a mapping conflict) is dead-lettered, so it cannot stop the stage |
+| `index-service` | bulk-indexes `events.enriched` and `alerts` into daily OpenSearch indices | documents keyed by event or alert id; a failed bulk, or documents refused with 429 or a 5xx or because of the index or cluster (a shard limit, a cluster block), are redelivered with exponential back-off; a document refused for its own content (a mapping conflict) is dead-lettered, so it cannot stop the stage |
 | `console` | Angular 20 (standalone, signals, zoneless): alerts with filters and detail, rules with hit counts, pipeline tab with the generator and Prometheus rates | |
 
 The services share one Postgres but never write the same tables: enrich owns the lookup tables, detect owns
@@ -148,8 +148,8 @@ records) is what produced the table above; the change and the measurement are re
   towards a threshold twice and that only the event that fired a window re-emits its alert.
 - `IndexIT` sends every document twice and asserts the count does not double, then sends a document
   OpenSearch refuses (a field first mapped as a date, then given "abc") and asserts it is dead-lettered and
-  the next one indexed. `IndexListenerTest` checks that a 429 or 5xx retries the batch and dead-letters
-  nothing.
+  the next one indexed. `IndexListenerTest` checks that a 429, a 5xx or a refusal of the index or the
+  cluster retries the batch and dead-letters nothing.
 - `RuleEngineTest` covers the parser, the modifiers, the condition grammar, and the window arithmetic.
 - The alert rules have promtool unit tests (`observability/alerts_test.yml`): nine scenarios, including the
   consumer-lag alert firing after two minutes above the threshold and staying quiet below it.

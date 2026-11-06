@@ -36,11 +36,13 @@ sink, so each gets the guarantee its sink can honour.
   times and the event goes to `events.dlq` with `error-stage` `detect`.
 - **index**: batch consumer, one bulk request per poll, documents keyed by their ids so a redelivered
   batch overwrites rather than duplicates; a failed bulk, or any document refused with 429 or a 5xx,
-  throws, and the batch is redelivered with exponential back-off, nothing dropped. A document refused for
-  any other reason (a 400 mapping conflict, which no retry fixes) goes to `events.dlq` with the status and
-  reason in headers once no retryable refusals remain in the batch, and the batch is acknowledged. The
-  first version threw on any refused document with unlimited retries, so one such document stopped the
-  stage for good.
+  throws, and the batch is redelivered with exponential back-off, nothing dropped. So does a refusal of
+  the index or the cluster (`validation_exception` from a shard limit on a new daily index,
+  `index_not_found_exception`, `cluster_block_exception`), which clears once an operator acts. A document
+  refused for its own content (`mapper_parsing_exception` and the like: a mapping conflict, which no retry
+  fixes) goes to `events.dlq` with the status and reason in headers once no other refusal remains in the
+  batch, and the batch is acknowledged. The first version threw on any refused document with unlimited
+  retries, so one such document stopped the stage for good.
 
 ## Consequences
 
