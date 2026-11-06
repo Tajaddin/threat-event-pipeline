@@ -11,7 +11,8 @@ sink, so each gets the guarantee its sink can honour.
 
 - **ingest**: idempotent producer (`enable.idempotence`, `acks=all`), duplicate event ids suppressed for
   ten minutes in memory, 503 with `Retry-After` when the producer's buffer or the broker cannot keep up,
-  429 from the per-key token bucket.
+  429 from the per-key token bucket. An id is remembered only after Kafka acknowledged its record, so a
+  client that retries a batch after a 503 loses nothing; the records that did land count as duplicates.
 - **enrich**: consume-transform-produce in one Kafka transaction per poll (`transaction-id-prefix`,
   batch listener, up to `max.poll.records` = 500 records, `isolation.level=read_committed` downstream). The
   enriched records, the DLQ records for malformed input and the consumed offsets commit or abort together,

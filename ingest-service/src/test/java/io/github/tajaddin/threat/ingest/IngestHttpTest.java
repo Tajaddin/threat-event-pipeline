@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +21,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -27,6 +29,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -119,5 +122,27 @@ class IngestHttpTest {
   @Test
   void anythingElseIsRefused() throws Exception {
     assertThat(send("GET", "/internal", null, null).statusCode()).isEqualTo(401);
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void brokerTimeoutAnswers503AndTheRetryIsAccepted() throws Exception {
+    // what KafkaTemplate throws when the topic's metadata does not arrive within max.block.ms
+    when(kafka.send(any(ProducerRecord.class)))
+        .thenThrow(
+            new KafkaException(
+                "Send failed",
+                new TimeoutException("Topic events.raw not present in metadata after 5000 ms.")))
+        .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
+    String body = oneEvent(4);
+
+    HttpResponse<String> first = send("POST", "/api/events", body, "test-key");
+    assertThat(first.statusCode()).isEqualTo(503);
+    assertThat(first.headers().firstValue("Retry-After")).hasValue("2");
+
+    HttpResponse<String> retry = send("POST", "/api/events", body, "test-key");
+    assertThat(retry.statusCode()).isEqualTo(202);
+    assertThat(retry.body()).contains("\"accepted\":1").contains("\"duplicates\":0");
+    verify(kafka, times(2)).send(any(ProducerRecord.class));
   }
 }

@@ -1,6 +1,7 @@
 package io.github.tajaddin.threat.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -14,8 +15,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import org.apache.kafka.clients.producer.BufferExhaustedException;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.springframework.kafka.KafkaException;
+import org.springframework.kafka.core.KafkaProducerException;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
@@ -40,6 +45,75 @@ class IngestUnitTest {
     assertThat(second.accepted()).isZero();
     assertThat(second.duplicates()).isEqualTo(5);
     verify(kafka, times(5)).send(any(ProducerRecord.class));
+  }
+
+  private static IngestService service(KafkaTemplate<String, String> kafka) {
+    IngestProperties props =
+        new IngestProperties(List.of(), 1000, 100, Duration.ofMinutes(1), 1000);
+    return new IngestService(kafka, props, new SimpleMeterRegistry());
+  }
+
+  @SuppressWarnings("unchecked")
+  private static CompletableFuture<SendResult<String, String>> sent() {
+    return CompletableFuture.completedFuture(mock(SendResult.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void sendThatFailsBeforeReturningIsBackpressureAndTheIdIsNotRemembered() {
+    KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+    when(kafka.send(any(ProducerRecord.class)))
+        .thenThrow(new KafkaException("Send failed", new TimeoutException("no metadata")))
+        .thenThrow(new KafkaException("Send failed", new BufferExhaustedException("buffer full")))
+        .thenReturn(sent());
+    IngestService service = service(kafka);
+    List<Event> events = new SyntheticEvents(2, 0, "t").batch(Instant.now(), 1);
+
+    assertThatThrownBy(() -> service.accept(events))
+        .isInstanceOf(IngestService.ProducerBackpressureException.class);
+    assertThatThrownBy(() -> service.accept(events))
+        .isInstanceOf(IngestService.ProducerBackpressureException.class);
+    IngestService.Result retry = service.accept(events);
+
+    assertThat(retry.accepted()).isEqualTo(1);
+    assertThat(retry.duplicates()).isZero();
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void deliveryTimeoutKeepsTheFailedIdsAndRemembersTheAcknowledgedOnes() {
+    KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+    CompletableFuture<SendResult<String, String>> expired = new CompletableFuture<>();
+    expired.completeExceptionally(
+        new KafkaProducerException(null, "Failed to send", new TimeoutException("expired")));
+    when(kafka.send(any(ProducerRecord.class)))
+        .thenReturn(sent())
+        .thenReturn(expired)
+        .thenReturn(sent());
+    IngestService service = service(kafka);
+    List<Event> events = new SyntheticEvents(3, 0, "t").batch(Instant.now(), 2);
+
+    assertThatThrownBy(() -> service.accept(events))
+        .isInstanceOf(IngestService.ProducerBackpressureException.class);
+    IngestService.Result retry = service.accept(events);
+
+    assertThat(retry.accepted()).isEqualTo(1);
+    assertThat(retry.duplicates()).isEqualTo(1);
+    verify(kafka, times(3)).send(any(ProducerRecord.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void anIdRepeatedInsideOneBatchIsProducedOnce() {
+    KafkaTemplate<String, String> kafka = mock(KafkaTemplate.class);
+    when(kafka.send(any(ProducerRecord.class))).thenReturn(sent());
+    Event e = new SyntheticEvents(4, 0, "t").batch(Instant.now(), 1).get(0);
+
+    IngestService.Result r = service(kafka).accept(List.of(e, e));
+
+    assertThat(r.accepted()).isEqualTo(1);
+    assertThat(r.duplicates()).isEqualTo(1);
+    verify(kafka, times(1)).send(any(ProducerRecord.class));
   }
 
   @Test

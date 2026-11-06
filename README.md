@@ -33,7 +33,7 @@ flowchart LR
 | Module | Role | Delivery guarantee |
 |---|---|---|
 | `common` | `Event`, `EnrichedEvent`, `Alert` records with validation, topic names, shared JSON, the synthetic generator | |
-| `ingest-service` | `POST /api/events` (batch of validated events), `X-API-Key`, per-key token bucket, produces to `events.raw` keyed by source address; `POST /api/generate` drives synthetic load | idempotent producer, `acks=all`; duplicate event ids dropped for ten minutes; 429 when the key's bucket is empty, 503 with `Retry-After` when the producer buffer is full |
+| `ingest-service` | `POST /api/events` (batch of validated events), `X-API-Key`, per-key token bucket, produces to `events.raw` keyed by source address; `POST /api/generate` drives synthetic load | idempotent producer, `acks=all`; duplicate event ids dropped for ten minutes, counting an id only once Kafka acknowledged it; 429 when the key's bucket is empty, 503 with `Retry-After` when the producer buffer is full or the broker times out |
 | `enrich-service` | consumes `events.raw`, adds country, ASN and internal flag from `ip_ranges` (inet containment) and owner and criticality from `assets`, produces `events.enriched`; malformed input to `events.dlq` with the error in headers | consume-transform-produce in one Kafka transaction per poll; outputs and offsets commit together, downstream reads `read_committed`; a poison record is retried three times then dead-lettered on its own |
 | `detect-service` | loads `rules/*.yml` into Postgres, evaluates stateless rules per event and threshold rules over tumbling windows per key, stores and produces `alerts`; REST for alerts, rules and stats | at-least-once with manual acknowledgement; alert ids are deterministic on (rule, key, window) and the store upserts, so redelivery is harmless |
 | `index-service` | bulk-indexes `events.enriched` and `alerts` into daily OpenSearch indices | documents keyed by event or alert id; a failed bulk is redelivered with exponential back-off |
@@ -242,7 +242,9 @@ lints and renders 15 objects in CI. `docs/DEPLOY.md` has the install commands.
   with three consumer threads sees every key; two instances would each see the partitions they own, so a rule
   grouping by a field other than the partition key (source address) would under-count across instances. A
   state store (Kafka Streams or Flink) is the next step.
-- Ingest de-duplication is per instance and in memory; two replicas could each accept the same event id.
+- Ingest de-duplication is per instance and in memory; two replicas could each accept the same event id, and
+  so could two concurrent requests to one instance, because an id is remembered only once Kafka acknowledged
+  it (the trade that keeps a failed batch retryable).
 - Lookups are synthetic: `ip_ranges` and `assets` are small tables seeded by Flyway, not a GeoIP database or a
   CMDB.
 - No distributed traces. Metrics and structured logs carry the ids; adding OpenTelemetry to the Spring Kafka

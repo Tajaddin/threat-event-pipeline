@@ -10,8 +10,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.TimeoutException;
@@ -67,38 +68,62 @@ public class IngestService {
 
   /**
    * Produces the batch; returns once every record is acknowledged (acks=all) or throws on failure.
+   * An id is remembered for de-duplication only once its record is acknowledged, so a batch that
+   * failed can be retried in full: the records that did reach Kafka count as duplicates, the rest
+   * are produced.
    */
   public Result accept(List<Event> events) {
     Instant now = Instant.now();
     byte[] ingestedAt = now.toString().getBytes(StandardCharsets.UTF_8);
-    List<CompletableFuture<?>> futures = new ArrayList<>(events.size());
+    Map<String, CompletableFuture<?>> sends = new LinkedHashMap<>();
     int dup = 0;
     Timer.Sample sample = Timer.start();
-    for (Event e : events) {
-      if (seen.asMap().putIfAbsent(e.id(), Boolean.TRUE) != null) {
-        dup++;
-        continue;
-      }
-      ProducerRecord<String, String> record =
-          new ProducerRecord<>(Topics.RAW, partitionKey(e), Json.write(e));
-      record.headers().add(Topics.HEADER_INGESTED_AT, ingestedAt);
-      futures.add(kafka.send(record));
-    }
     try {
-      CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
+      for (Event e : events) {
+        if (sends.containsKey(e.id()) || seen.getIfPresent(e.id()) != null) {
+          dup++;
+          continue;
+        }
+        ProducerRecord<String, String> record =
+            new ProducerRecord<>(Topics.RAW, partitionKey(e), Json.write(e));
+        record.headers().add(Topics.HEADER_INGESTED_AT, ingestedAt);
+        sends.put(e.id(), kafka.send(record));
+      }
+      CompletableFuture.allOf(sends.values().toArray(CompletableFuture[]::new)).join();
     } catch (RuntimeException ex) {
-      failed.increment(futures.size());
-      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-      if (cause instanceof TimeoutException || cause.getCause() instanceof TimeoutException) {
-        throw new ProducerBackpressureException(cause);
+      int acknowledged = 0;
+      for (var send : sends.entrySet()) {
+        if (send.getValue().isDone() && !send.getValue().isCompletedExceptionally()) {
+          seen.put(send.getKey(), Boolean.TRUE);
+          acknowledged++;
+        }
+      }
+      failed.increment(events.size() - dup - acknowledged);
+      if (isTimeout(ex)) {
+        throw new ProducerBackpressureException(ex);
       }
       throw ex;
     } finally {
       sample.stop(produceTimer);
     }
-    accepted.increment(futures.size());
+    sends.keySet().forEach(id -> seen.put(id, Boolean.TRUE));
+    accepted.increment(sends.size());
     duplicates.increment(dup);
-    return new Result(futures.size(), dup);
+    return new Result(sends.size(), dup);
+  }
+
+  /**
+   * Metadata or buffer space not available within max.block.ms (thrown by send) and records expired
+   * after delivery.timeout.ms (failed futures) are both Kafka TimeoutExceptions somewhere in the
+   * cause chain; BufferExhaustedException is one too.
+   */
+  private static boolean isTimeout(Throwable ex) {
+    for (Throwable t = ex; t != null; t = t.getCause()) {
+      if (t instanceof TimeoutException) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Raised when the producer cannot keep up (buffer full or broker slow): the API answers 503. */
