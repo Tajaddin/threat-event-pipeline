@@ -177,6 +177,9 @@ full stack. `docs/DEPLOY.md` has the load run, the test commands, the Helm insta
 | `GET /api/stats?minutes=` | detect | alerts per rule and severity over a window |
 | `GET /actuator/health/{liveness,readiness}`, `GET /actuator/prometheus` | all | probes and metrics |
 
+When keys are configured (`INGEST_API_KEYS`, `DETECT_API_KEY`), every `/api/**` call on that service needs a
+valid `X-API-Key`; probes, metrics and the OpenAPI docs stay open, and any other path is refused.
+
 Every service logs JSON lines (logstash encoder) with the service name and trace and span ids when present; each
 alert is logged with its rule, severity, key, event count and latency.
 
@@ -211,8 +214,11 @@ Playwright, a short load run), `alerts` (promtool), `helm` (lint and template), 
 
 ## Security
 
-- `X-API-Key` on the ingest API with a token bucket per key (bucket4j); an empty key list is allowed only for
-  local development and the `.env.example` says so.
+- `X-API-Key` on the ingest and detect APIs, enforced by Spring Security on the normalised request path, so
+  `/api;x/events` or `/%61pi/events` cannot skip it, and every path not explicitly opened is refused. The
+  console's proxy adds detect's key on the server side, so it never reaches a browser. A token bucket per
+  ingest key (bucket4j). An empty key list is allowed only for local development and the `.env.example` says
+  so.
 - Every inbound field is validated by size, pattern and range before it is produced; detect and index never
   trust a record's shape either.
 - No secrets in the repository: `.env` is ignored, passwords and keys come from the environment or, on

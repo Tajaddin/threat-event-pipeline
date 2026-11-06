@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param maxWindows bound on concurrently tracked (rule, key, window) states
  * @param maxEventIdsPerAlert how many triggering event ids an alert keeps
  * @param corsOrigins origins allowed to call the alert API (the console)
+ * @param apiKeys accepted X-API-Key values for /api/**; empty means open (local development only)
  */
 @ConfigurationProperties(prefix = "detect")
 public record DetectProperties(
@@ -17,11 +18,13 @@ public record DetectProperties(
     Duration windowRetention,
     long maxWindows,
     int maxEventIdsPerAlert,
-    List<String> corsOrigins) {
+    List<String> corsOrigins,
+    List<String> apiKeys) {
   public DetectProperties {
     if (windowRetention == null) windowRetention = Duration.ofMinutes(30);
     if (maxWindows <= 0) maxWindows = 500_000;
     if (maxEventIdsPerAlert <= 0) maxEventIdsPerAlert = 50;
     if (corsOrigins == null) corsOrigins = List.of();
+    if (apiKeys == null) apiKeys = List.of();
   }
 }

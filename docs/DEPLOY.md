@@ -23,7 +23,9 @@ curl -X POST http://localhost:8081/api/generate -H 'Content-Type: application/js
   -d '{"eventsPerSecond":500,"seconds":60,"attackShare":0.05}'
 ```
 
-Set `INGEST_API_KEYS=key1,key2` in `.env` to require `X-API-Key` on the ingest API (the console asks for it).
+Set `INGEST_API_KEYS=key1,key2` in `.env` to require `X-API-Key` on the ingest API (the console asks for it),
+and `DETECT_API_KEY` to require one on the detect API (the console's proxy sends it; use letters and digits
+only, for example `openssl rand -hex 24`, since nginx reads `$` as a variable).
 The first start takes two to three minutes: Kafka and OpenSearch warm up, the services wait for them.
 
 Resource notes: Kafka 768 MB heap, OpenSearch 1 GB heap (`OPENSEARCH_HEAP`), each service about 300 MB.

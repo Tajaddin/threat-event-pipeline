@@ -153,6 +153,7 @@ services:
       DETECT_CONCURRENCY: ${DETECT_CONCURRENCY:-3}
       DETECT_CORS_ORIGINS: http://localhost:${CONSOLE_PORT:-4200},http://localhost:4200
       DETECT_RULES_DIR: /rules
+      DETECT_API_KEYS: ${DETECT_API_KEY:-}
     volumes:
       - ./rules:/rules:ro
     ports:
@@ -179,6 +180,8 @@ services:
     build:
       context: ./console
     image: threat/console:local
+    environment:
+      DETECT_API_KEY: ${DETECT_API_KEY:-}
     ports:
       - "${CONSOLE_PORT:-4200}:80"
     depends_on: [detect-service, ingest-service]
