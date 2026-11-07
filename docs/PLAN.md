@@ -43,7 +43,7 @@ Backpressure: bounded consumer `max.poll.records`, producer buffer and `linger.m
 from the rate limiter and 503 when the producer buffer is exhausted. Consumer lag: Micrometer's Kafka
 consumer metrics plus `kafka-exporter`; alert on lag above a threshold for 2 minutes.
 
-## Numbers to produce (single machine, Docker Desktop on Windows, i7 / 20 threads)
+## Numbers to produce (single machine, Docker Desktop on Windows, i5-13600KF / 20 threads)
 
 - Sustained events per second end to end (generator -> alert index) with the lag staying bounded.
 - Detection latency p95: event timestamp at ingest to alert creation, recorded on every alert.

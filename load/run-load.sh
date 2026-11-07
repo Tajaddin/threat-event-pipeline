@@ -55,7 +55,7 @@ results="${results%,}]"
 python - "$OUT" "$STEP" "$ATTACK" "$SEED_BASE" "$results" <<'EOF'
 import json, sys, datetime
 out, step, attack, seed_base, results = sys.argv[1], int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), json.loads(sys.argv[5])
-json.dump({"run_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"), "machine": "single machine, Docker Desktop (WSL2) on Windows 11, Intel i7 / 20 threads, 16 GB VM memory", "seconds_per_step": step, "attack_share": attack, "seed_base": seed_base,
+json.dump({"run_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"), "machine": "single machine, Docker Desktop (WSL2) on Windows 11, Intel i5-13600KF / 20 threads, 16 GB VM memory", "seconds_per_step": step, "attack_share": attack, "seed_base": seed_base,
            "method": "ingest generator at a target rate per step; rates and lag read from Prometheus 1-minute windows at the end of each step; single machine, Docker Desktop",
            "steps": results}, open(out, "w"), indent=2)
 print("wrote", out)
