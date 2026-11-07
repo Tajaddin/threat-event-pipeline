@@ -1,0 +1,12 @@
+#!/bin/sh
+# Sourced by the nginx image's entrypoint before the templates are rendered; every variable the template uses
+# must be set here, or nginx would read the placeholder as one of its own variables.
+# The DNS server the container itself uses (Docker's embedded DNS in Compose, the cluster DNS on Kubernetes)
+# becomes nginx's resolver.
+export DNS_RESOLVER="${DNS_RESOLVER:-$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf)}"
+# Upstreams default to the Compose service names; the Helm chart sets fully qualified ones.
+export DETECT_UPSTREAM="${DETECT_UPSTREAM:-http://detect-service:8080}"
+export INGEST_UPSTREAM="${INGEST_UPSTREAM:-http://ingest-service:8080}"
+export PROMETHEUS_UPSTREAM="${PROMETHEUS_UPSTREAM:-http://prometheus:9090}"
+# Sent to detect-service as X-API-Key, so the key stays on the server. Empty sends no header (local only).
+export DETECT_API_KEY="${DETECT_API_KEY:-}"

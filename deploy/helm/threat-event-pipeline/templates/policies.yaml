@@ -47,7 +47,9 @@ spec:
       path: /actuator/prometheus
       interval: 15s
 {{- end }}
+{{- if gt (int .Values.detect.replicas) 1 }}
 ---
+# only with more than one replica: minAvailable 1 over a single pod would block every node drain
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -60,3 +62,4 @@ spec:
     matchLabels:
       app.kubernetes.io/instance: {{ .Release.Name }}
       app.kubernetes.io/component: detect-service
+{{- end }}

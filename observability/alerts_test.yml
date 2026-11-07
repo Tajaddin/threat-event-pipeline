@@ -70,6 +70,22 @@ tests:
               description: "Malformed or unprocessable events are arriving at 2.0/s."
 
   - interval: 1m
+    name: DeadLetterRate adds detect's dead letters to enrich's
+    input_series:
+      - series: 'enrich_events_total{outcome="dlq"}'
+        values: "0+60x15"
+      - series: 'detect_events_total{outcome="dlq"}'
+        values: "0+60x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: DeadLetterRate
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "more than one record per second is being dead-lettered"
+              description: "Malformed or unprocessable events are arriving at 2.0/s."
+
+  - interval: 1m
     name: IngestRejections fires at 20% rejected
     input_series:
       - series: 'http_server_requests_seconds_count{service="ingest-service", uri="/api/events", status="202"}'

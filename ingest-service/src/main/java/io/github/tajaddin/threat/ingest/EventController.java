@@ -43,8 +43,10 @@ public class EventController {
       return ResponseEntity.badRequest()
           .body(Map.of("error", "batch larger than " + props.maxBatch()));
     }
-    String key = (String) request.getAttribute("apiKey");
-    String limiterKey = key != null ? key : request.getRemoteAddr();
+    String limiterKey =
+        request.getUserPrincipal() != null
+            ? request.getUserPrincipal().getName()
+            : request.getRemoteAddr();
     if (!limiter.tryConsume(limiterKey, events.size())) {
       return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
           .body(Map.of("error", "rate limit exceeded"));

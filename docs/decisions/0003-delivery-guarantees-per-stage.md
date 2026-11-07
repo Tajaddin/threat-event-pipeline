@@ -11,27 +11,57 @@ sink, so each gets the guarantee its sink can honour.
 
 - **ingest**: idempotent producer (`enable.idempotence`, `acks=all`), duplicate event ids suppressed for
   ten minutes in memory, 503 with `Retry-After` when the producer's buffer or the broker cannot keep up,
-  429 from the per-key token bucket.
+  429 from the per-key token bucket. An id is remembered only after Kafka acknowledged its record, so a
+  client that retries a batch after a 503 loses nothing; the records that did land count as duplicates.
 - **enrich**: consume-transform-produce in one Kafka transaction per poll (`transaction-id-prefix`,
   batch listener, up to `max.poll.records` = 500 records, `isolation.level=read_committed` downstream). The
   enriched records, the DLQ records for malformed input and the consumed offsets commit or abort together,
-  so a crash never leaves a duplicate output visible to `read_committed` consumers. An unexpected failure
-  (database down) rolls back with the index of the failing record (`BatchListenerFailedException`): the
-  records before it are committed, it is retried three times a second apart, and after that
-  `DefaultAfterRollbackProcessor` publishes it to `events.dlq` with the exception in headers and commits its
-  offset, so a poison record cannot stall a partition.
-- **detect**: at-least-once with manual acknowledgement after the alert is stored and produced; alert ids
-  are deterministic and the store upserts, so redelivery is harmless (tested by producing the same burst
-  twice).
+  so a crash never leaves a duplicate output visible to `read_committed` consumers. A record that fails on
+  its own (malformed, an address that is not an IP, a value the database rejects, a bug) is published to
+  `events.dlq` with the error in headers inside the same transaction, and the records around it carry on,
+  so a poison record cannot stall a partition. A failure of the database or the broker
+  (`TransientDataAccessException`, `DataAccessResourceFailureException` and the like, Kafka exceptions)
+  rolls the whole poll back, and the after-rollback processor re-reads it with back-off from one second to
+  thirty, indefinitely, so an outage dead-letters nothing.
+- **detect**: at-least-once with manual acknowledgement after the alert is stored and its send to `alerts`
+  is acknowledged; alert ids are deterministic and the store upserts, so redelivery is harmless (tested by
+  producing the same burst twice). Each threshold window keeps the ids of the events that moved its
+  measure, so a redelivered event does not count towards the threshold again, and the id of the event that
+  fired it: when that event comes back because storing or producing the alert failed, the alert is
+  returned again and the retry finishes the job, while a replay of the earlier events raises nothing. A
+  distinct-count rule does not remember events that repeated a value it had already seen (that would keep
+  an id per matching event until the window fires), so their redelivery can add to the alert's event
+  count, never to the distinct measure. A database or broker failure is retried with back-off from one
+  second to thirty, indefinitely; any other failure (a rule that throws on an event, say) is tried three
+  times and the event goes to `events.dlq` with `error-stage` `detect`.
 - **index**: batch consumer, one bulk request per poll, documents keyed by their ids so a redelivered
-  batch overwrites rather than duplicates; a failed bulk throws, the batch is redelivered with exponential
-  back-off, nothing is dropped.
+  batch overwrites rather than duplicates; a failed bulk, or any document refused with 429 or a 5xx,
+  throws, and the batch is redelivered with exponential back-off, nothing dropped. So does a refusal of
+  the index or the cluster (`validation_exception` from a shard limit on a new daily index,
+  `index_not_found_exception`, `cluster_block_exception`), which clears once an operator acts. A document
+  refused for its own content (`mapper_parsing_exception` and the like: a mapping conflict, which no retry
+  fixes) goes to `events.dlq` with the status and reason in headers once no other refusal remains in the
+  batch, and the batch is acknowledged. The first version threw on any refused document with unlimited
+  retries, so one such document stopped the stage for good.
 
 ## Consequences
 
-- The integration tests assert the properties: `EnrichIT` sends 31 good and 2 bad records and expects
-  exactly 31 enriched and 2 dead-lettered; `DetectIT` sends a burst twice and expects one alert; `IndexIT`
-  sends everything twice and counts documents.
+- The first detect version set the window's "fired" flag before storing the alert and produced it without
+  waiting. A failed store was redelivered by Spring's default error handler (ten attempts, no back-off,
+  then skip), the engine saw the flag, emitted nothing, and the alert was lost; each retry also counted the
+  event again.
+- The first enrich version reported the failing record's index and relied on `DefaultAfterRollbackProcessor` to
+  dead-letter it. A transactional batch listener never does that: it either re-seeks the whole batch or, with
+  `batchRecoverAfterRollback`, dead-letters every record in it. The processor bean was also typed
+  `<String, String>`, which Spring Boot does not inject into the container factory, so it was never used.
+  One poison record redelivered the same batch forever.
+- The tests assert the properties: `EnrichFailurePolicyTest` (in-process broker) puts a record the
+  database rejects between good ones and expects it alone in the DLQ, and makes the database fail twice
+  and expects nothing dead-lettered; `EnrichIT` sends 32 good and 3 bad records and expects exactly 32
+  enriched and 3 dead-lettered; `DetectIT` sends a burst twice and expects one alert;
+  `DetectFailurePolicyTest` (in-process broker) dead-letters an event that makes a rule throw and waits
+  out a database that refuses three stores without losing the alert; `IndexIT` sends everything twice and
+  counts documents.
 - The first version committed a transaction per record (`ack-mode: record`). The first load run measured
   about 65 events per second on the enrich stage, with `sendOffsetsToTransaction` and the commit taking
   about 15 ms per record, and all traffic on one partition because ingest keyed records by feed name. The

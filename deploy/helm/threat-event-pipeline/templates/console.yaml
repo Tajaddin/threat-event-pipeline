@@ -17,13 +17,28 @@ spec:
         {{- include "tep.labels" . | nindent 8 }}
         app.kubernetes.io/component: console
     spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: console
           image: {{ include "tep.image" (dict "Values" .Values "component" "console") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
+          env:
+            {{- $svc := printf "%s.svc.%s:8080" .Release.Namespace .Values.clusterDomain }}
+            - name: DETECT_UPSTREAM
+              value: {{ printf "http://%s-detect-service.%s" .Release.Name $svc | quote }}
+            - name: INGEST_UPSTREAM
+              value: {{ printf "http://%s-ingest-service.%s" .Release.Name $svc | quote }}
+            - name: PROMETHEUS_UPSTREAM
+              value: {{ .Values.console.prometheusUrl | quote }}
+            - name: DETECT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "detect.apiKeySecret must name a Secret with key apiKey" .Values.detect.apiKeySecret }}
+                  key: apiKey
           readinessProbe:
             httpGet: { path: /, port: http }
             periodSeconds: 10
@@ -31,7 +46,20 @@ spec:
             {{- toYaml .Values.console.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
-            capabilities: { drop: [ALL], add: [NET_BIND_SERVICE] }
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            # the image's entrypoint renders the nginx config here at start-up; nginx keeps its pid and
+            # temporary files in /tmp
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: conf
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

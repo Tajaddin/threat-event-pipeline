@@ -32,6 +32,7 @@ server:
 
 ingest:
   api-keys: ${INGEST_API_KEYS:}
+  require-api-keys: ${INGEST_REQUIRE_API_KEYS:false}
   rate-limit-per-minute: ${INGEST_RATE_LIMIT_PER_MINUTE:600000}
   max-batch: 1000
   dedup-window: 10m

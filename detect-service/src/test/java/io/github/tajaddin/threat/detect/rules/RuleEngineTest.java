@@ -151,6 +151,105 @@ class RuleEngineTest {
   }
 
   @Test
+  void redeliveredEventIsCountedOnceAndOnlyTheFiringEventReEmitsTheAlert() {
+    DetectionEngine engine = new DetectionEngine(Duration.ofMinutes(5), 1000, 10);
+    engine.setRules(RuleLoader.load(null).rules());
+    Instant base = Instant.parse("2026-10-17T12:00:00Z");
+    List<EnrichedEvent> failures = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      failures.add(
+          enriched(
+              new Event(
+                  "f" + i,
+                  base.plusSeconds(i),
+                  Event.EventType.AUTH,
+                  "t",
+                  "ws-0101",
+                  "a.khan",
+                  "203.0.113.9",
+                  null,
+                  null,
+                  "failure",
+                  "4625",
+                  3,
+                  null,
+                  null),
+              false,
+              "medium"));
+    }
+    for (int i = 0; i < 9; i++) {
+      assertThat(bruteForce(engine.evaluate(failures.get(i)))).isEmpty();
+    }
+    // the ninth failure delivered again must not stand in for the tenth
+    assertThat(bruteForce(engine.evaluate(failures.get(8)))).isEmpty();
+
+    List<Alert> fired = bruteForce(engine.evaluate(failures.get(9)));
+    assertThat(fired).hasSize(1);
+    assertThat(fired.get(0).eventCount()).isEqualTo(10);
+
+    // the firing event redelivered (say its store failed) re-emits the same alert
+    assertThat(bruteForce(engine.evaluate(failures.get(9)))).containsExactly(fired.get(0));
+    // a replay of the events before it (a rebalance, a seek) raises nothing more
+    for (int i = 0; i < 9; i++) {
+      assertThat(bruteForce(engine.evaluate(failures.get(i)))).isEmpty();
+    }
+  }
+
+  @Test
+  void distinctRuleReplayNeitherStandsInForAValueNorReEmits() {
+    DetectionEngine engine = new DetectionEngine(Duration.ofMinutes(5), 1000, 50);
+    engine.setRules(RuleLoader.load(null).rules());
+    Instant base = Instant.parse("2026-10-17T12:00:00Z");
+    List<EnrichedEvent> spray = new ArrayList<>();
+    for (int i = 0; i < 15; i++) {
+      spray.add(failedLogon("s" + i, base.plusSeconds(i), "user" + i));
+    }
+    for (int i = 0; i < 14; i++) {
+      assertThat(passwordSpray(engine.evaluate(spray.get(i)))).isEmpty();
+    }
+    assertThat(passwordSpray(engine.evaluate(spray.get(13)))).isEmpty();
+    assertThat(passwordSpray(engine.evaluate(failedLogon("r1", base, "user0")))).isEmpty();
+
+    List<Alert> fired = passwordSpray(engine.evaluate(spray.get(14)));
+    assertThat(fired).hasSize(1);
+    assertThat(fired.get(0).eventCount()).isEqualTo(16);
+
+    assertThat(passwordSpray(engine.evaluate(spray.get(14)))).containsExactly(fired.get(0));
+    for (int i = 0; i < 14; i++) {
+      assertThat(passwordSpray(engine.evaluate(spray.get(i)))).isEmpty();
+    }
+  }
+
+  private static EnrichedEvent failedLogon(String id, Instant at, String user) {
+    return enriched(
+        new Event(
+            id,
+            at,
+            Event.EventType.AUTH,
+            "t",
+            "ws-0101",
+            user,
+            "203.0.113.9",
+            null,
+            null,
+            "failure",
+            "4625",
+            3,
+            null,
+            null),
+        false,
+        "medium");
+  }
+
+  private static List<Alert> passwordSpray(List<Alert> alerts) {
+    return alerts.stream().filter(a -> a.ruleId().equals("auth-password-spray")).toList();
+  }
+
+  private static List<Alert> bruteForce(List<Alert> alerts) {
+    return alerts.stream().filter(a -> a.ruleId().equals("auth-brute-force")).toList();
+  }
+
+  @Test
   void distinctThresholdCountsDistinctValues() {
     DetectionEngine engine = new DetectionEngine(Duration.ofMinutes(5), 1000, 10);
     engine.setRules(RuleLoader.load(null).rules());

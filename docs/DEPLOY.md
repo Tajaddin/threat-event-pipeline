@@ -23,7 +23,9 @@ curl -X POST http://localhost:8081/api/generate -H 'Content-Type: application/js
   -d '{"eventsPerSecond":500,"seconds":60,"attackShare":0.05}'
 ```
 
-Set `INGEST_API_KEYS=key1,key2` in `.env` to require `X-API-Key` on the ingest API (the console asks for it).
+Set `INGEST_API_KEYS=key1,key2` in `.env` to require `X-API-Key` on the ingest API (the console asks for it),
+and `DETECT_API_KEY` to require one on the detect API (the console's proxy sends it; use letters and digits
+only, for example `openssl rand -hex 24`, since nginx reads `$` as a variable).
 The first start takes two to three minutes: Kafka and OpenSearch warm up, the services wait for them.
 
 Resource notes: Kafka 768 MB heap, OpenSearch 1 GB heap (`OPENSEARCH_HEAP`), each service about 300 MB.
@@ -58,13 +60,17 @@ On this machine the local JDK is 25 and the project targets 21: builds and tests
 
 The chart in `deploy/helm/threat-event-pipeline` deploys the four services and the console with readiness
 and liveness probes, a rolling update with zero unavailable, non-root pods with read-only root filesystems,
-a NetworkPolicy, a PodDisruptionBudget for detect, an optional Ingress and an optional ServiceMonitor.
-Kafka, Postgres and OpenSearch are external and configured in `values.yaml`:
+a NetworkPolicy, an optional Ingress and an optional ServiceMonitor. Detect runs one replica because its
+threshold windows are in memory (a PodDisruptionBudget is added if you raise `detect.replicas`); each enrich
+pod uses its pod name in its transactional id prefix. Kafka, Postgres and OpenSearch are external and
+configured in `values.yaml`. Both API key Secrets are required; the console's proxy sends detect's key, so
+put the console's Ingress behind an authenticating proxy:
 
 ```bash
 kubectl create namespace threat
 kubectl -n threat create secret generic threat-postgres --from-literal=password='...'
-kubectl -n threat create secret generic threat-ingest-keys --from-literal=apiKeys='key1,key2'
+kubectl -n threat create secret generic threat-ingest-keys --from-literal=apiKeys="$(openssl rand -hex 24)"
+kubectl -n threat create secret generic threat-detect-key --from-literal=apiKey="$(openssl rand -hex 24)"
 helm upgrade --install tep deploy/helm/threat-event-pipeline -n threat \
   --set kafka.bootstrapServers=my-kafka:9092 \
   --set postgres.url=jdbc:postgresql://my-pg:5432/threat \

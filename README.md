@@ -33,10 +33,10 @@ flowchart LR
 | Module | Role | Delivery guarantee |
 |---|---|---|
 | `common` | `Event`, `EnrichedEvent`, `Alert` records with validation, topic names, shared JSON, the synthetic generator | |
-| `ingest-service` | `POST /api/events` (batch of validated events), `X-API-Key`, per-key token bucket, produces to `events.raw` keyed by source address; `POST /api/generate` drives synthetic load | idempotent producer, `acks=all`; duplicate event ids dropped for ten minutes; 429 when the key's bucket is empty, 503 with `Retry-After` when the producer buffer is full |
-| `enrich-service` | consumes `events.raw`, adds country, ASN and internal flag from `ip_ranges` (inet containment) and owner and criticality from `assets`, produces `events.enriched`; malformed input to `events.dlq` with the error in headers | consume-transform-produce in one Kafka transaction per poll; outputs and offsets commit together, downstream reads `read_committed`; a poison record is retried three times then dead-lettered on its own |
-| `detect-service` | loads `rules/*.yml` into Postgres, evaluates stateless rules per event and threshold rules over tumbling windows per key, stores and produces `alerts`; REST for alerts, rules and stats | at-least-once with manual acknowledgement; alert ids are deterministic on (rule, key, window) and the store upserts, so redelivery is harmless |
-| `index-service` | bulk-indexes `events.enriched` and `alerts` into daily OpenSearch indices | documents keyed by event or alert id; a failed bulk is redelivered with exponential back-off |
+| `ingest-service` | `POST /api/events` (batch of validated events), `X-API-Key`, per-key token bucket, produces to `events.raw` keyed by source address; `POST /api/generate` drives synthetic load | idempotent producer, `acks=all`; duplicate event ids dropped for ten minutes, counting an id only once Kafka acknowledged it; 429 when the key's bucket is empty, 503 with `Retry-After` when the producer buffer is full or the broker times out |
+| `enrich-service` | consumes `events.raw`, adds country, ASN and internal flag from `ip_ranges` (inet containment) and owner and criticality from `assets`, produces `events.enriched`; malformed input to `events.dlq` with the error in headers | consume-transform-produce in one Kafka transaction per poll; outputs and offsets commit together, downstream reads `read_committed`; a record that fails on its own is dead-lettered inside the transaction, a database or broker failure rolls the poll back and retries it with back-off |
+| `detect-service` | loads `rules/*.yml` into Postgres, evaluates stateless rules per event and threshold rules over tumbling windows per key, stores and produces `alerts`; REST for alerts, rules and stats | at-least-once: the offset is acknowledged after the alert is stored and its send acknowledged; a redelivered event does not count towards a threshold twice, and the event that fired a window re-emits its alert, whose id is deterministic on (rule, key, window) and which the store upserts; database or broker failures are retried with back-off indefinitely, any other failure three times, then the event goes to `events.dlq` |
+| `index-service` | bulk-indexes `events.enriched` and `alerts` into daily OpenSearch indices | documents keyed by event or alert id; a failed bulk, or documents refused with 429 or a 5xx or because of the index or cluster (a shard limit, a cluster block), are redelivered with exponential back-off; a document refused for its own content (a mapping conflict) is dead-lettered, so it cannot stop the stage |
 | `console` | Angular 20 (standalone, signals, zoneless): alerts with filters and detail, rules with hit counts, pipeline tab with the generator and Prometheus rates | |
 
 The services share one Postgres but never write the same tables: enrich owns the lookup tables, detect owns
@@ -109,6 +109,11 @@ quantiles from the detect histogram) and waits for lag to drain before the next 
 Run 2026-10-17 11:43 UTC, 60 s per step, attack share 2%, seed base 1792237002; single machine, Docker Desktop (WSL2) on Windows 11, Intel i7 / 20 threads, 16 GB VM memory. Rates are 1-minute Prometheus rates read at the end of each step, lag is the maximum over the step across all consumer groups, latency is ingest-accepted to alert-created from the detect histogram.
 <!-- /LOAD-RESULTS -->
 
+These runs predate two changes to detect (November 2026): it now waits for each alert's send to be
+acknowledged before it commits the event's offset (its producer no longer lingers), and it keeps the ids of
+the events each threshold window counted. The load run has not been repeated since, so the detect, latency
+and alert columns describe the earlier version.
+
 The generator runs inside ingest-service and calls the same accept path as `POST /api/events`, so the
 numbers include validation, de-duplication and the producer but not HTTP parsing. At 16,000 events/s the stack
 had not saturated: lag stayed under 3,000 records (under a fifth of a second of traffic) and detection p99 at
@@ -127,15 +132,26 @@ records) is what produced the table above; the change and the measurement are re
 
 ### Correctness
 
-- `EnrichIT` sends 31 well-formed and 2 malformed records and asserts exactly 31 enriched records with the
-  expected context (a hostile-range source resolves to its country and ASN, a `10.` source is internal, a
-  known host gets its owner and criticality) and exactly 2 dead-lettered records with `error` and
-  `error-stage` headers.
+- `EnrichIT` sends 32 well-formed and 3 bad records (two malformed, one with a source address that is not an
+  IP, followed on its partition by a good one) and asserts exactly 32 enriched records with the expected
+  context (a hostile-range source resolves to its country and ASN, a `10.` source is internal, a known host
+  gets its owner and criticality) and exactly 3 dead-lettered records with `error` and `error-stage` headers.
+- `EnrichFailurePolicyTest` runs the listener against an in-process broker with the lookups stubbed: a
+  record the database rejects is dead-lettered alone while the records around it commit, and a database
+  that fails twice is retried with back-off and dead-letters nothing.
 - `DetectIT` replays a password-spray burst twice and asserts one alert, because the alert id is
   deterministic and the store upserts.
-- `IndexIT` sends every document twice and asserts the count does not double.
+- `DetectFailurePolicyTest` (in-process broker, storage mocked) feeds an event that makes a rule throw, then
+  two that raise alerts while the database refuses three stores: the first goes to `events.dlq` after three
+  attempts, and both alerts are stored and produced. `DetectListenerTest` checks the offset is not
+  acknowledged before the alert's send is, and `RuleEngineTest` that a redelivered event does not count
+  towards a threshold twice and that only the event that fired a window re-emits its alert.
+- `IndexIT` sends every document twice and asserts the count does not double, then sends a document
+  OpenSearch refuses (a field first mapped as a date, then given "abc") and asserts it is dead-lettered and
+  the next one indexed. `IndexListenerTest` checks that a 429, a 5xx or a refusal of the index or the
+  cluster retries the batch and dead-letters nothing.
 - `RuleEngineTest` covers the parser, the modifiers, the condition grammar, and the window arithmetic.
-- The alert rules have promtool unit tests (`observability/alerts_test.yml`): eight scenarios, including the
+- The alert rules have promtool unit tests (`observability/alerts_test.yml`): nine scenarios, including the
   consumer-lag alert firing after two minutes above the threshold and staying quiet below it.
 
 ## Running it
@@ -177,13 +193,16 @@ full stack. `docs/DEPLOY.md` has the load run, the test commands, the Helm insta
 | `GET /api/stats?minutes=` | detect | alerts per rule and severity over a window |
 | `GET /actuator/health/{liveness,readiness}`, `GET /actuator/prometheus` | all | probes and metrics |
 
+When keys are configured (`INGEST_API_KEYS`, `DETECT_API_KEY`), every `/api/**` call on that service needs a
+valid `X-API-Key`; probes, metrics and the OpenAPI docs stay open, and any other path is refused.
+
 Every service logs JSON lines (logstash encoder) with the service name and trace and span ids when present; each
 alert is logged with its rule, severity, key, event count and latency.
 
 ## Observability
 
 - Micrometer counters and timers per stage: `ingest_events_total{outcome}`, `enrich_events_total{outcome}`,
-  `enrich_batch_size`, `detect_events_total`, `detect_alerts_total{rule,severity}`,
+  `enrich_batch_size`, `detect_events_total{outcome}`, `detect_alerts_total{rule,severity}`,
   `detect_latency_seconds` (ingest to alert, histogram), `index_documents_total{kind}`, plus the Kafka client
   metrics and JVM metrics Spring Boot exposes.
 - `kafka-exporter` publishes `kafka_consumergroup_lag` per group and partition; Grafana's dashboard
@@ -197,12 +216,12 @@ alert is logged with its rule, severity, key, event count and latency.
 
 | Suite | Count | Runs where |
 |---|---|---|
-| JUnit unit tests (`common`, `ingest`, `detect` rule engine) | 16 | `mvn verify`, surefire |
-| JUnit integration tests with Testcontainers (Kafka, Postgres, OpenSearch) | 7 | `mvn verify`, failsafe |
+| JUnit unit tests, including HTTP tests on a real Tomcat and failure-policy tests on an in-process Kafka broker | 92 | `mvn verify`, surefire |
+| JUnit integration tests with Testcontainers (Kafka, Postgres, OpenSearch) | 8 | `mvn verify`, failsafe |
 | Angular unit tests (Karma, headless Chromium) | 3 | `npx ng test` |
 | Playwright end to end against the Compose stack | 1 | `npx playwright test` |
-| promtool alert-rule tests | 8 scenarios | `make alerts-test` |
-| Helm | lint and template (15 objects) | `make helm-lint` |
+| promtool alert-rule tests | 9 scenarios | `make alerts-test` |
+| Helm | lint and template (14 objects) | `make helm-lint` |
 
 GitHub Actions (`.github/workflows/ci.yml`) runs seven jobs on every push and pull request: `java` (Spotless
 check, `mvn verify` with JaCoCo), `console` (lint, unit tests, production build), `e2e` (Compose stack,
@@ -211,22 +230,31 @@ Playwright, a short load run), `alerts` (promtool), `helm` (lint and template), 
 
 ## Security
 
-- `X-API-Key` on the ingest API with a token bucket per key (bucket4j); an empty key list is allowed only for
-  local development and the `.env.example` says so.
-- Every inbound field is validated by size, pattern and range before it is produced; detect and index never
-  trust a record's shape either.
+- `X-API-Key` on the ingest and detect APIs, enforced by Spring Security on the normalised request path, so
+  `/api;x/events` or `/%61pi/events` cannot skip it, and every path not explicitly opened is refused. The
+  console's proxy adds detect's key on the server side, so it never reaches a browser; the console has no
+  login of its own and acts with that key, so expose it only on localhost (as Compose does) or behind an
+  authenticating proxy. A token bucket per ingest key (bucket4j). An empty key list leaves an API open, which
+  is for local development only (the `.env.example` says so); the Helm chart sets `INGEST_REQUIRE_API_KEYS`
+  and `DETECT_REQUIRE_API_KEYS`, so on Kubernetes ingest and detect refuse to start without a key.
+- Every inbound field is validated by size, pattern and range before it is produced, and source and
+  destination addresses must be IPv4 or IPv6 literals; detect and index never trust a record's shape either.
 - No secrets in the repository: `.env` is ignored, passwords and keys come from the environment or, on
   Kubernetes, from Secrets referenced by the chart; `gitleaks` runs in CI.
-- Images run as a non-root user on `eclipse-temurin:21-jre-alpine`; pods run with a read-only root filesystem,
-  dropped capabilities, a NetworkPolicy and a PodDisruptionBudget for detect.
+- Images run as non-root users (the services on `eclipse-temurin:21-jre-alpine`, the console on
+  `nginx-unprivileged`); every pod runs with a read-only root filesystem and dropped capabilities, and a
+  NetworkPolicy limits who reaches the services. The API key Secrets are not optional: the ingest, detect
+  and console pods do not start without them.
 - Dependencies are pinned in `pom.xml` and `package-lock.json` and updated by Dependabot.
 
 ## Kubernetes
 
 `deploy/helm/threat-event-pipeline` deploys the four services and the console with readiness and liveness
 probes, rolling updates with zero unavailable, resource requests and limits, an optional Ingress and an
-optional ServiceMonitor; Kafka, Postgres and OpenSearch are external and configured in `values.yaml`. The chart
-lints and renders 15 objects in CI. `docs/DEPLOY.md` has the install commands.
+optional ServiceMonitor; Kafka, Postgres and OpenSearch are external and configured in `values.yaml`. Both API
+key Secrets are required, each enrich pod gets its own transactional id prefix (its pod name), and detect runs
+one replica (see Limitations). The chart lints and renders 14 objects in CI. `docs/DEPLOY.md` has the install
+commands.
 
 ## Limitations
 
@@ -234,9 +262,19 @@ lints and renders 15 objects in CI. `docs/DEPLOY.md` has the install commands.
   generator itself, so it reports where this stack saturates here, not the services' ceilings.
 - Threshold windows live in each detect instance's memory (Caffeine, bounded by `max-windows`). One instance
   with three consumer threads sees every key; two instances would each see the partitions they own, so a rule
-  grouping by a field other than the partition key (source address) would under-count across instances. A
-  state store (Kafka Streams or Flink) is the next step.
-- Ingest de-duplication is per instance and in memory; two replicas could each accept the same event id.
+  grouping by a field other than the partition key (source address) would under-count across instances, which
+  is why the Helm chart deploys one detect replica. The memory is also why a database or broker outage can
+  still cost an alert: a window that fired is kept for `window-retention` (30 minutes from its first event),
+  so if the alert cannot be stored until then, or the instance restarts meanwhile, the redelivered event
+  starts a fresh window and falls short of the threshold. A state store (Kafka Streams or Flink) is the next
+  step.
+- Each enrich pod's transactional id prefix is its pod name. A Deployment gives a replacement pod a new name,
+  so it cannot fence a crashed pod's open transaction; detect and index, which read `read_committed`, wait at
+  that partition until the transaction times out (`transaction.timeout.ms`, 60 s by default). A StatefulSet
+  would give the replacement the same name and ids, and abort the old transaction as it starts.
+- Ingest de-duplication is per instance and in memory; two replicas could each accept the same event id, and
+  so could two concurrent requests to one instance, because an id is remembered only once Kafka acknowledged
+  it (the trade that keeps a failed batch retryable).
 - Lookups are synthetic: `ip_ranges` and `assets` are small tables seeded by Flyway, not a GeoIP database or a
   CMDB.
 - No distributed traces. Metrics and structured logs carry the ids; adding OpenTelemetry to the Spring Kafka

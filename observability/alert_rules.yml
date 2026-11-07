@@ -23,7 +23,9 @@ groups:
           description: "Offsets have not moved for 3 minutes while records are waiting."
 
       - alert: DeadLetterRate
-        expr: sum(rate(enrich_events_total{outcome="dlq"}[5m])) > 1
+        expr: |
+          (sum(rate(enrich_events_total{outcome="dlq"}[5m])) or vector(0))
+            + (sum(rate(detect_events_total{outcome="dlq"}[5m])) or vector(0)) > 1
         for: 5m
         labels:
           severity: warning

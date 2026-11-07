@@ -29,7 +29,7 @@ spring:
       compression-type: lz4
       properties:
         enable.idempotence: true
-        linger.ms: 5
+        linger.ms: 0   # every alert send is awaited before the offset is acknowledged; lingering only adds latency
     listener:
       ack-mode: manual
       observation-enabled: false
@@ -43,6 +43,8 @@ detect:
   max-windows: 500000
   max-event-ids-per-alert: 50
   cors-origins: ${DETECT_CORS_ORIGINS:http://localhost:4200}
+  api-keys: ${DETECT_API_KEYS:}
+  require-api-keys: ${DETECT_REQUIRE_API_KEYS:false}
   concurrency: ${DETECT_CONCURRENCY:3}
 
 server:

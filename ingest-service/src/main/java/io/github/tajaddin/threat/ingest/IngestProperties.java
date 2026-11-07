@@ -5,7 +5,9 @@ import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * @param apiKeys accepted X-API-Key values; empty means open (local development only)
+ * @param apiKeys accepted X-API-Key values; blank entries are dropped, and an empty list means open
+ *     (local development only)
+ * @param requireApiKeys refuse to start with an empty key list (the Helm chart sets it)
  * @param rateLimitPerMinute events per minute allowed per API key (batch size counts)
  * @param maxBatch largest batch one request may carry
  * @param dedupWindow how long an event id is remembered for duplicate suppression
@@ -14,12 +16,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "ingest")
 public record IngestProperties(
     List<String> apiKeys,
+    boolean requireApiKeys,
     long rateLimitPerMinute,
     int maxBatch,
     Duration dedupWindow,
     long dedupMaxEntries) {
   public IngestProperties {
-    if (apiKeys == null) apiKeys = List.of();
+    apiKeys = apiKeys == null ? List.of() : apiKeys.stream().filter(k -> !k.isBlank()).toList();
+    if (requireApiKeys && apiKeys.isEmpty()) {
+      throw new IllegalArgumentException(
+          "ingest.require-api-keys is set but ingest.api-keys holds no key");
+    }
     if (rateLimitPerMinute <= 0) rateLimitPerMinute = 600_000;
     if (maxBatch <= 0) maxBatch = 1000;
     if (dedupWindow == null) dedupWindow = Duration.ofMinutes(10);
