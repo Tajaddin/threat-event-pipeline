@@ -86,7 +86,7 @@ the moment ingest accepted the first contributing event.
 ## Results
 
 All numbers below come from committed scripts run on one machine (Docker Desktop with WSL2 on Windows 11,
-Intel i7 with 20 threads, 16 GB VM memory) with the full Compose stack including the observability profile.
+Intel i5-13600KF with 20 threads, 16 GB VM memory) with the full Compose stack including the observability profile.
 They describe this pipeline on this machine, not a cluster.
 
 ### Load run
@@ -99,26 +99,33 @@ quantiles from the detect histogram) and waits for lag to drain before the next 
 <!-- LOAD-RESULTS -->
 | Target events/s | Achieved at ingest | Enriched/s | Detected/s | Indexed/s | Max consumer lag | Detection p95 | Detection p99 | Alerts/s |
 |---|---|---|---|---|---|---|---|---|
-| 500 | 499 | 463 | 488 | 489 | 125 | 11 ms | 14 ms | 4.4 |
-| 1,000 | 998 | 971 | 932 | 935 | 228 | 14 ms | 19 ms | 10.7 |
-| 2,000 | 1,996 | 1,847 | 1,949 | 1,956 | 317 | 16 ms | 21 ms | 19.4 |
-| 4,000 | 3,992 | 3,868 | 3,708 | 3,719 | 826 | 22 ms | 27 ms | 41.3 |
-| 8,000 | 7,985 | 7,366 | 7,774 | 7,793 | 1,348 | 26 ms | 38 ms | 70.1 |
-| 16,000 | 15,969 | 15,430 | 14,811 | 14,856 | 2,971 | 24 ms | 32 ms | 136.9 |
+| 500 | 500 | 460 | 473 | 446 | 125 | 21 ms | 26 ms | 4.7 |
+| 1,000 | 1,000 | 904 | 931 | 878 | 225 | 18 ms | 22 ms | 10.8 |
+| 2,000 | 2,000 | 1,775 | 1,826 | 1,902 | 428 | 21 ms | 28 ms | 20.3 |
+| 4,000 | 4,000 | 3,847 | 3,593 | 3,738 | 835 | 21 ms | 27 ms | 38.3 |
+| 8,000 | 8,000 | 7,573 | 7,053 | 7,340 | 1,669 | 25 ms | 32 ms | 74.6 |
+| 16,000 | 16,001 | 14,882 | 15,299 | 14,433 | 4,071 | 166 ms | 733 ms | 119.6 |
 
-Run 2026-10-17 11:43 UTC, 60 s per step, attack share 2%, seed base 1792237002; single machine, Docker Desktop (WSL2) on Windows 11, Intel i7 / 20 threads, 16 GB VM memory. Rates are 1-minute Prometheus rates read at the end of each step, lag is the maximum over the step across all consumer groups, latency is ingest-accepted to alert-created from the detect histogram.
+Run 2026-11-07 23:22 UTC, 60 s per step, attack share 2%, seed base 1794093313; single machine, Docker Desktop (WSL2) on Windows 11, Intel i5-13600KF / 20 threads, 16 GB VM memory. Rates are 1-minute Prometheus rates read at the end of each step, lag is the maximum over the step across all consumer groups, latency is ingest-accepted to alert-created from the detect histogram.
 <!-- /LOAD-RESULTS -->
 
-These runs predate two changes to detect (November 2026): it now waits for each alert's send to be
-acknowledged before it commits the event's offset (its producer no longer lingers), and it keeps the ids of
-the events each threshold window counted. The load run has not been repeated since, so the detect, latency
-and alert columns describe the earlier version.
+The table is from a run on 2026-11-07 of commit 972c961 (the current `main`), which includes the two November
+2026 changes to detect: it waits for each alert's send to be acknowledged before it commits the event's offset
+(its producer no longer lingers), and it keeps the ids of the events each threshold window counted. The
+previous run, 2026-10-17 on the October code (in the git history of `load/results/latest.json`), measured
+detection p95 24 ms and p99 32 ms at 16,000 events/s; this run measured p95 166 ms and p99 733 ms there. At the steps
+up to 8,000 events/s the throughput columns stayed within about 10% of October's, with higher latency at the two
+lowest rates (p99 26 and 22 ms against 14 and 19 ms) and 24-35% more lag at 2,000 and 8,000 events/s. Machine
+state when the run started: the stack had been up for one minute, host CPU load 42%, 1.2 GB of host memory free
+outside the 16 GB VM, nothing else running in Docker. The October run's host state was not recorded, so the two
+runs are not under matched conditions and the cause of the latency rise was not isolated.
 
 The generator runs inside ingest-service and calls the same accept path as `POST /api/events`, so the
-numbers include validation, de-duplication and the producer but not HTTP parsing. At 16,000 events/s the stack
-had not saturated: lag stayed under 3,000 records (under a fifth of a second of traffic) and detection p99 at
-32 ms. A single 60 s probe at 32,000 (`load/results/latest-32k-probe.json`, run with `RATES=32000`) found the
-knee: the generator produced 31,938/s and enrich and detect kept pace at about 31,400/s each, but the index
+numbers include validation, de-duplication and the producer but not HTTP parsing. At 16,000 events/s the stages
+still kept pace and lag peaked at 4,071 records (about a quarter of a second of traffic), but detection latency
+had begun to rise: p95 166 ms, p99 733 ms. A single 60 s probe at 32,000 on 2026-10-17
+(`load/results/latest-32k-probe.json`, run with `RATES=32000` on the October code and not repeated since) found
+the knee: the generator produced 31,938/s and enrich and detect kept pace at about 31,400/s each, but the index
 stage peaked at about 27,000 documents/s, consumer lag grew to 307,000 records and detection latency rose to
 p95 4.1 s and p99 5.3 s. On this machine the first stage to give out is OpenSearch bulk indexing, not Kafka or
 the services.
